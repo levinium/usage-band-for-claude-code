@@ -1,0 +1,13 @@
+{
+  "name": "usage-band-for-claude-code",
+  "description": "Usage Band: plan limits and context window above the Claude Code prompt.",
+  "owner": {
+    "name": "levinium"
+  },
+  "plugins": [
+    {
+      "name": "usage-band",
+      "source": "./"
+    }
+  ]
+}

@@ -1,0 +1,62 @@
+# Publishes a draft release when a version tag is pushed:
+#
+#   git tag v0.2.0 && git push origin v0.2.0
+#
+# The tag must be "v" plus "version" in .claude-plugin/plugin.json. The first step checks
+# that rather than trusting it, so a release can never carry a package that reports another
+# version.
+#
+# A DRAFT, so the notes can be written and the file checked before anyone sees it.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches the version in plugin.json
+        id: version
+        run: |
+          version=$(python3 -c "import json; print(json.load(open('.claude-plugin/plugin.json'))['version'])")
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$version" != "$tag" ]; then
+            echo "Tag $tag does not match version $version in plugin.json. Bump the version, or retag."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Validate and test
+        run: |
+          claude plugin validate .
+          claude plugin test .
+
+      - name: Package
+        run: python3 tools/package.py
+
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft \
+            --verify-tag \
+            --title "Usage Band for Claude Code ${{ steps.version.outputs.version }}" \
+            --generate-notes \
+            "dist/usage-band-v${{ steps.version.outputs.version }}.plugin" \
+            "dist/usage-band-v${{ steps.version.outputs.version }}.plugin.sha256"

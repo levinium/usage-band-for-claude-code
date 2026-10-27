@@ -1,0 +1,12 @@
+# Line endings are LF, in the repository and in the working copy, on every platform.
+#
+# Git for Windows sets core.autocrlf=true system wide, which would rewrite this tree to
+# CRLF on the next checkout. The packaging script must stay LF or the Linux runner that
+# builds releases cannot start it.
+* text=auto eol=lf
+*.sh text eol=lf
+
+# Never touched: rewriting a byte inside these corrupts them.
+*.png binary
+*.zip binary
+*.plugin binary

@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # The engine that loads mods is the one that checks them: validate reads the
+      # manifests and the hooks module the way a session would, and test runs
+      # tests/*.test.tsx against the engine itself.
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Validate
+        run: claude plugin validate .
+
+      - name: Test
+        run: claude plugin test .
+
+      - name: Package
+        run: python3 tools/package.py

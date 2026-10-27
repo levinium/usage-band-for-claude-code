@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="20" viewBox="0 0 760 20"><style>
+  .ink{stroke:#6e7781;fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+  .inkf{fill:#6e7781}
+  .rst{fill:#6e7781;font:500 11px system-ui,-apple-system,'Segoe UI',sans-serif;dominant-baseline:central}
+  .lbl{fill:#1f2328;font:500 11px system-ui,-apple-system,'Segoe UI',sans-serif;dominant-baseline:central}
+  @media (prefers-color-scheme: dark){ .ink{stroke:#8b949e} .inkf,.rst{fill:#8b949e} .lbl{fill:#e6edf3} }
+</style><circle cx="10" cy="10" r="7" fill="none" stroke="rgba(127,127,127,0.22)" stroke-width="3"/><circle cx="10" cy="10" r="7" fill="none" stroke="#3fb950" stroke-width="3" stroke-linecap="round" stroke-dasharray="11.88 43.98" transform="rotate(-90 10 10)"/><g transform="translate(36 3)"><circle class="ink" cx="7" cy="7" r="5.75"/><path class="ink" d="M7 4v3l2 1.5"/></g>
+<rect x="57" y="7" width="170.3" height="6" rx="3" fill="rgba(127,127,127,0.22)"/><rect x="57" y="7" width="57.9" height="6" rx="3" fill="#3fb950"/>
+<text class="rst" x="259.3" y="10" text-anchor="end">3h</text><g transform="translate(281.33333333333337 3)"><rect class="ink" x="1.25" y="2.25" width="11.5" height="10.5" rx="2"/><path class="ink" d="M1.25 5.75h11.5M4.5 1v2.5M9.5 1v2.5"/></g>
+<rect x="302.33333333333337" y="7" width="170.3" height="6" rx="3" fill="rgba(127,127,127,0.22)"/><rect x="302.33333333333337" y="7" width="103.9" height="6" rx="3" fill="#d29922"/>
+<text class="rst" x="504.7" y="10" text-anchor="end">4d</text><g transform="translate(526.6666666666667 3)"><path class="inkf" d="M7 0.75l1.55 4.7 4.7 1.55-4.7 1.55L7 13.25l-1.55-4.7L0.75 7l4.7-1.55z"/></g>
+<rect x="547.6666666666667" y="7" width="170.3" height="6" rx="3" fill="rgba(127,127,127,0.22)"/><rect x="547.6666666666667" y="7" width="20.4" height="6" rx="3" fill="#3fb950"/>
+<text class="rst" x="750.0" y="10" text-anchor="end">4d</text></svg>

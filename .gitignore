@@ -1,0 +1,6 @@
+# Written by Claude Code each time it loads the mod: the API's type declarations.
+.claude-plugin/types/
+.mcpb-cache/
+dist/
+*.log
+.DS_Store
