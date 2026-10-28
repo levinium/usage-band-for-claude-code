@@ -77,6 +77,30 @@ test('ring: tooltip pill is hover-revealed, click compacts', async ($, on) => {
   await ui.unmount()
 })
 
+test('ring: a refused compaction toasts the engine reason', async ($, on) => {
+  const toasts: string[] = []
+  on('clock.now', () => ({ value: NOW }))
+  on('session.usage', () => usage(65))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('session.compact', () => {
+    throw new Error('summary request failed')
+  })
+  on('ui.toast', (_, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: 'ring' })
+  await ui.pointer({ type: 'up', x: 1, y: 0, button: 'left', in: 'ring' })
+  expect(toasts).toHaveLength(1)
+  // A throwing hook is skipped and core rejects in its place; either way the
+  // engine's reason follows the colon.
+  expect(toasts[0]).toMatch(/^Compaction could not start: \S/)
+  await ui.unmount()
+})
+
 test('terminal falls back to text bars', async ($, on) => {
   on('clock.now', () => ({ value: NOW }))
   on('session.usage', () => usage(13))

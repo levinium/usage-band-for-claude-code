@@ -22,6 +22,13 @@ named from it and the Release workflow checks the tag against it.
 
 Installed copies pick up a new version with `claude plugin marketplace update`.
 
+## [0.1.1] - 2026-10-27
+
+### Fixed
+
+- When compaction cannot start, the toast now gives the reason Claude Code reported instead of
+  only "Compaction could not start".
+
 ## [0.1.0] - 2026-10-27
 
 ### Added

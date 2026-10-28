@@ -60,8 +60,11 @@ const compact = async ($: EngineInterface, isWorking: boolean) => {
   try {
     const { skip } = await $.session.compact()
     if (skip) $.ui.toast('Compaction was skipped')
-  } catch {
-    $.ui.toast('Compaction could not start')
+  } catch (err) {
+    // The engine rejects with its own reason (a turn running, the summarizer
+    // failing); show it rather than guess.
+    const reason = err instanceof Error ? err.message : String(err)
+    $.ui.toast(reason ? `Compaction could not start: ${reason}` : 'Compaction could not start')
   } finally {
     await update($, isCompacting, () => false)
   }
