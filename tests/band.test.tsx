@@ -159,5 +159,29 @@ test('terminal falls back to text bars', async ($, on) => {
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
   expect((await ui.find({ type: 'Text', text: /^█$/ }))?.props.color).toBe('success')
   expect((await ui.findAll({ type: 'Svg' })).length).toBe(0)
+  // Fable has no data: shade, not an empty bar.
+  expect(await ui.find({ type: 'Text', text: '░'.repeat(8) })).toBeDefined()
+  await ui.unmount()
+})
+
+test('no data is hatched with a dim icon, unlike a real 0%', async ($, on) => {
+  on('clock.now', () => ({ value: NOW }))
+  on('session.usage', () => ({
+    value: {
+      startedAt: NOW,
+      context: { window: 1000000, tokens: 0, percent: undefined },
+      rateLimits: [{ kind: 'five_hour', percentUsed: 0, resetsAt: '2026-10-27T20:30:00Z' }],
+    },
+  }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  const band = (await ui.findAll({ type: 'Svg' })).find(s => String(s.props.alt).startsWith('Context'))
+  const svg = String(band?.props.source)
+  expect(band?.props.alt).toBe('Context not measured, Session 0%, Weekly no data, Fable no data')
+  expect(svg).toContain('stroke-dasharray="2.5 2.5"') // ring with no context reading
+  expect(svg.match(/fill="url\(#nd\)"/g)).toHaveLength(2) // Weekly and Fable; Session is a real 0%
+  expect(svg.match(/class="nod"/g)).toHaveLength(2)
   await ui.unmount()
 })

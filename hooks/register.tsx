@@ -188,11 +188,18 @@ export const register: Register = on => {
         {rows.map(({ label, limit }) => {
           const pct = limit?.percentUsed ?? 0
           const filled = filledCells(pct)
+          // No data yet draws as shade, not as an empty (0%) bar.
           return (
             <Box key={label} flexDirection="row">
               <Text dimColor>{`  ${label[0]} `}</Text>
-              <Text color={barColor(pct)}>{'█'.repeat(filled)}</Text>
-              <Text color="inactive">{'█'.repeat(CELLS - filled)}</Text>
+              {limit ? (
+                <Box flexDirection="row">
+                  <Text color={barColor(pct)}>{'█'.repeat(filled)}</Text>
+                  <Text color="inactive">{'█'.repeat(CELLS - filled)}</Text>
+                </Box>
+              ) : (
+                <Text color="inactive">{'░'.repeat(CELLS)}</Text>
+              )}
               <Text dimColor>{` ${resetsIn(limit?.resetsAt, now)}`}</Text>
             </Box>
           )

@@ -44,8 +44,12 @@ const STYLE = `<style>
   .inkf{fill:#6e7781}
   .rst{fill:#6e7781;font:${FONT};dominant-baseline:central}
   .lbl{fill:#1f2328;font:${FONT};dominant-baseline:central}
+  .nod{opacity:0.4}
   @media (prefers-color-scheme: dark){ .ink{stroke:#8b949e} .inkf,.rst{fill:#8b949e} .lbl{fill:#e6edf3} }
 </style>`
+
+// Diagonal stripes for a bar with no data yet, so it never reads as 0%.
+const HATCH = `<defs><pattern id="nd" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="5" height="5" fill="${TRACK}"/><rect class="inkf" width="2" height="5" fill-opacity="0.55"/></pattern></defs>`
 
 // Each icon is drawn in a 14x14 box centred on (7,7).
 const ICONS: Record<Icon, string> = {
@@ -72,8 +76,12 @@ const hoverText = (s: BarSlot, p: number, room: number) => {
 
 const ring = (pct: number | null) => {
   const c = MID
+  // No context reading yet: a thin dashed outline instead of an empty (0%) ring.
+  if (pct === null) {
+    return `<circle class="ink" cx="${c}" cy="${c}" r="${RING_R}" stroke-dasharray="2.5 2.5" style="stroke-linecap:butt;stroke-opacity:0.7"/>`
+  }
   const len = 2 * Math.PI * RING_R
-  const p = Math.max(0, Math.min(100, pct ?? 0))
+  const p = Math.max(0, Math.min(100, pct))
   const arc =
     p > 0
       ? `<circle cx="${c}" cy="${c}" r="${RING_R}" fill="none" stroke="${fillColor(p)}" stroke-width="${RING_STROKE}" stroke-linecap="round" stroke-dasharray="${((len * p) / 100).toFixed(2)} ${len.toFixed(2)}" transform="rotate(-90 ${c} ${c})"/>`
@@ -115,13 +123,14 @@ export const bandSvg = (width: number, ctx: number | null, ringState: RingState,
         const p = Math.max(0, Math.min(100, s.pct ?? 0))
         const fw = p > 0 ? Math.max(BAR_H, (barW * p) / 100) : 0
         const fill = fw > 0 ? `<rect x="${bx}" y="${by}" width="${fw.toFixed(1)}" height="${BAR_H}" rx="${BAR_H / 2}" fill="${fillColor(p)}"/>` : ''
-        return `<g transform="translate(${x} ${MID - ICON / 2})">${ICONS[s.icon]}</g>
-<rect x="${bx}" y="${by}" width="${barW.toFixed(1)}" height="${BAR_H}" rx="${BAR_H / 2}" fill="${TRACK}"/>${fill}
+        const noData = s.pct === null
+        return `<g transform="translate(${x} ${MID - ICON / 2})"${noData ? ' class="nod"' : ''}>${ICONS[s.icon]}</g>
+<rect x="${bx}" y="${by}" width="${barW.toFixed(1)}" height="${BAR_H}" rx="${BAR_H / 2}" fill="${noData ? 'url(#nd)' : TRACK}"/>${fill}
 ${s.reset ? `<text class="rst" x="${(x + segW).toFixed(1)}" y="${MID}" text-anchor="end">${esc(s.reset)}</text>` : ''}`
       })
       .join('')
   }
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${ROW_H}" viewBox="0 0 ${width} ${ROW_H}">${STYLE}${ring(ctx)}${body}</svg>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${ROW_H}" viewBox="0 0 ${width} ${ROW_H}">${STYLE}${HATCH}${ring(ctx)}${body}</svg>`
 }
 
 /** An opaque rounded pill holding one line of text, following the app theme. */

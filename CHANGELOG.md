@@ -22,6 +22,14 @@ named from it and the Release workflow checks the tag against it.
 
 Installed copies pick up a new version with `claude plugin marketplace update`.
 
+## [0.1.4] - 2026-10-28
+
+### Changed
+- A limit with no data yet now looks different from one at 0%: its bar is hatched with grey
+  stripes and its icon is dimmed. In a terminal it shows as shaded cells.
+- Until the context window is measured, the ring is a thin dashed outline instead of an
+  empty ring.
+
 ## [0.1.3] - 2026-10-28
 
 ### Added
