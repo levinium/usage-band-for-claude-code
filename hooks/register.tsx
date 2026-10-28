@@ -125,8 +125,8 @@ export const register: Register = on => {
     ]
     const ctxPct = ctx ?? 0
 
-    if (e.surface === 'desktop') {
-      const { Box, Svg, Client } = $.ui.resolve(e)
+    if (e.surface === 'desktop' || e.surface === 'vscode') {
+      const { Box, Svg, Button } = $.ui.resolve(e)
       const ringState = (await read($, isCompacting)) ? 'compacting' : 'idle'
       const slots: BarSlot[] = rows.map(r => ({
         icon: r.icon,
@@ -141,7 +141,15 @@ export const register: Register = on => {
       // The band is a plain image, so redraws (a resize) swap it in place.
       // Hover lives in layers above it: a keyed Box per slot reveals that
       // slot's pill, a display toggle that never redraws the band. Over the
-      // ring, an invisible Client takes the clicks an image cannot.
+      // ring, an invisible Client takes the clicks an image cannot; VS Code
+      // has no Client, so a plain Button of blank cells stands in.
+      let ringHit
+      if (e.surface === 'desktop') {
+        const { Client } = $.ui.resolve(e)
+        ringHit = <Client key="ring" module="./ring-hit.tsx" width={RING_COLS} height={1} />
+      } else {
+        ringHit = <Button key="ring" plain label={' '.repeat(RING_COLS)} onPress={() => compact($, e.props.isWorking, isInteractive)} />
+      }
       return (
         <Box position="relative" width="100%">
           <Svg source={bandSvg(width, ctx, ringState, slots)} alt={alt} width={width} height={ROW_H} />
@@ -162,7 +170,7 @@ export const register: Register = on => {
               })
             : null}
           <Box key="ring" position="absolute" left={0} top={0} flexDirection="row">
-            <Client key="ring" module="./ring-hit.tsx" width={RING_COLS} height={1} />
+            {ringHit}
             <Box display="none" hover={{ display: 'flex' }}>
               <Svg source={ringTipSvg(ctx)} alt="Click to compact" width={TIP_W} height={ROW_H} />
             </Box>

@@ -1,11 +1,11 @@
 {
   "name": "usage-band",
-  "version": "0.1.2",
-  "description": "Your Claude Code plan limits and context window as a row of bars above the prompt in the desktop app.",
+  "version": "0.1.3",
+  "description": "Your Claude Code plan limits and context window as a row of bars above the prompt in the desktop app and VS Code.",
   "author": { "name": "levinium", "url": "https://github.com/levinium" },
   "homepage": "https://github.com/levinium/usage-band-for-claude-code",
   "repository": "https://github.com/levinium/usage-band-for-claude-code",
   "license": "MIT",
-  "keywords": ["usage", "rate-limits", "context", "status", "desktop"],
+  "keywords": ["usage", "rate-limits", "context", "status", "desktop", "vscode"],
   "types": "./types/index.d.ts"
 }

@@ -22,6 +22,12 @@ named from it and the Release workflow checks the tag against it.
 
 Installed copies pick up a new version with `claude plugin marketplace update`.
 
+## [0.1.3] - 2026-10-28
+
+### Added
+- The picture version of the row in the VS Code extension, which had been getting the
+  terminal's text version. Clicking the ring compacts there too.
+
 ## [0.1.2] - 2026-10-27
 
 ### Fixed

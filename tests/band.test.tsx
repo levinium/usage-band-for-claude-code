@@ -126,6 +126,30 @@ test('ring: a headless session compacts through the /compact command', async ($,
   await ui.unmount()
 })
 
+test('vscode: same SVG band, ring click is a Button', async ($, on) => {
+  let compacts = 0
+  on('clock.now', () => ({ value: NOW }))
+  on('session.usage', () => usage(13))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('session.compact', () => {
+    compacts += 1
+    return { skip: 'test stands in for core' }
+  })
+  on('ui.toast', () => ({ value: undefined }))
+
+  await $.session.start({ cwd: '/', surface: 'vscode', isInteractive: true })
+  const ui = await $.ui.mount({ ...BAND, surface: 'vscode' })
+
+  const svgs = await ui.findAll({ type: 'Svg' })
+  expect(svgs).toHaveLength(5)
+  expect(svgs.find(s => String(s.props.alt).startsWith('Context'))?.props.alt).toBe('Context 13%, Session 3%, Weekly 85%, Fable no data')
+  expect(await ui.findAll({ type: 'Client' })).toHaveLength(0)
+
+  await ui.press({ key: 'ring' })
+  expect(compacts).toBe(1)
+  await ui.unmount()
+})
+
 test('terminal falls back to text bars', async ($, on) => {
   on('clock.now', () => ({ value: NOW }))
   on('session.usage', () => usage(13))

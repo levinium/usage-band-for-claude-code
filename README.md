@@ -81,6 +81,11 @@ The ring at the left fills clockwise as the conversation's context fills, colour
 rules as the bars. Hover it to see the percentage. **Click it to compact the conversation**, the
 same as typing `/compact`. During a turn it waits and tells you so.
 
+### In VS Code
+
+The Claude Code extension for VS Code draws the same row as the desktop app, ring click
+included. It needs a version of the extension that runs mods.
+
 ### In a terminal
 
 The terminal has no pictures, so there the band draws as text: a coloured `█` bar per limit
