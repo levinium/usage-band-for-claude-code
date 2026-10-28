@@ -101,6 +101,31 @@ test('ring: a refused compaction toasts the engine reason', async ($, on) => {
   await ui.unmount()
 })
 
+test('ring: a headless session compacts through the /compact command', async ($, on) => {
+  const commands: string[] = []
+  let compacts = 0
+  on('clock.now', () => ({ value: NOW }))
+  on('session.usage', () => usage(65))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('session.compact', () => {
+    compacts += 1
+    return { skip: 'test stands in for core' }
+  })
+  on('command.run', (_, e) => {
+    commands.push(e.command)
+    return { text: '' }
+  })
+  on('ui.toast', () => ({ value: undefined }))
+
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: 'ring' })
+  await ui.pointer({ type: 'up', x: 1, y: 0, button: 'left', in: 'ring' })
+  expect(commands).toEqual(['compact'])
+  expect(compacts).toBe(0)
+  await ui.unmount()
+})
+
 test('terminal falls back to text bars', async ($, on) => {
   on('clock.now', () => ({ value: NOW }))
   on('session.usage', () => usage(13))

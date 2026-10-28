@@ -1,6 +1,6 @@
 {
   "name": "usage-band",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Your Claude Code plan limits and context window as a row of bars above the prompt in the desktop app.",
   "author": { "name": "levinium", "url": "https://github.com/levinium" },
   "homepage": "https://github.com/levinium/usage-band-for-claude-code",

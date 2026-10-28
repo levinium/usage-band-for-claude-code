@@ -22,6 +22,13 @@ named from it and the Release workflow checks the tag against it.
 
 Installed copies pick up a new version with `claude plugin marketplace update`.
 
+## [0.1.2] - 2026-10-27
+
+### Fixed
+
+- Clicking the ring now compacts in the desktop app. Its sessions run headless, where the
+  mod's compaction call is not available, so the ring runs `/compact` there instead.
+
 ## [0.1.1] - 2026-10-27
 
 ### Fixed

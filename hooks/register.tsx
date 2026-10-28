@@ -50,7 +50,7 @@ const resetsIn = (resetsAt: string | undefined, now: number) => {
   return `${mins}m`
 }
 
-const compact = async ($: EngineInterface, isWorking: boolean) => {
+const compact = async ($: EngineInterface, isWorking: boolean, isInteractive: boolean) => {
   if (isWorking) {
     $.ui.toast('Compaction waits until the current turn finishes')
     return
@@ -58,8 +58,14 @@ const compact = async ($: EngineInterface, isWorking: boolean) => {
   if (await read($, isCompacting)) return
   await update($, isCompacting, () => true)
   try {
-    const { skip } = await $.session.compact()
-    if (skip) $.ui.toast('Compaction was skipped')
+    if (isInteractive) {
+      const { skip } = await $.session.compact()
+      if (skip) $.ui.toast('Compaction was skipped')
+    } else {
+      // A headless session (the desktop app runs one through the SDK) has no
+      // $.session.compact; there compaction runs as a /compact turn.
+      await $.command.run({ command: 'compact' })
+    }
   } catch (err) {
     // The engine rejects with its own reason (a turn running, the summarizer
     // failing); show it rather than guess.
@@ -72,8 +78,10 @@ const compact = async ($: EngineInterface, isWorking: boolean) => {
 
 export const register: Register = on => {
   let isWorking = false
+  let isInteractive = true
 
   on('session.start', async ($, e, next) => {
+    isInteractive = e.isInteractive
     const result = await next(e)
     const usage = await $.session.usage()
     await update($, limits, () => toLimits(usage.rateLimits))
@@ -95,7 +103,7 @@ export const register: Register = on => {
   on('ui.message', async ($, e, next) => {
     const data = e.data as { press?: boolean } | null
     if (data?.press) {
-      await compact($, isWorking)
+      await compact($, isWorking, isInteractive)
     }
     return next(e)
   })
@@ -166,7 +174,7 @@ export const register: Register = on => {
     const { Box, Button, Text } = $.ui.resolve(e)
     return (
       <Box flexDirection="row">
-        <Button key="compact" plain onPress={() => compact($, e.props.isWorking)}>
+        <Button key="compact" plain onPress={() => compact($, e.props.isWorking, isInteractive)}>
           <Text color={ctx === null ? 'inactive' : barColor(ctxPct)}>{wheelGlyph(ctxPct)}</Text>
         </Button>
         {rows.map(({ label, limit }) => {
