@@ -74,6 +74,22 @@ const hoverText = (s: BarSlot, p: number, room: number) => {
   return options.find(t => textFits(t, room)) ?? `${p}%`
 }
 
+/** The spare-room line: the longest form that fits, or '' when none does. */
+const spareText = (slots: BarSlot[], room: number) => {
+  const pct = (s: BarSlot) => Math.max(0, Math.min(100, s.pct ?? 0))
+  const forms = [
+    (s: BarSlot) =>
+      s.pct === null ? `${s.name}: no data yet` : `${s.name} · ${pct(s)}% used${s.resetLong ? ` · resets in ${s.resetLong}` : ''}`,
+    (s: BarSlot) => (s.pct === null ? `${s.name}: no data` : `${s.name} · ${pct(s)}% used`),
+    (s: BarSlot) => (s.pct === null ? `${s.name}: no data` : `${s.name} ${pct(s)}%`),
+  ]
+  const parts = forms.map(f => slots.map(f)).find(p => textFits(p.join('    '), room))
+  // A gap of its own between the parts: SVG would collapse plain spaces.
+  return parts ? parts.map((p, i) => `<tspan${i ? ` dx="${SPARE_GAP}"` : ''}>${esc(p)}</tspan>`).join('') : ''
+}
+
+const SPARE_GAP = 16
+
 const ring = (pct: number | null) => {
   const c = MID
   // No context reading yet: a thin dashed outline instead of an empty (0%) ring.
@@ -94,9 +110,14 @@ export const bandWidth = (columns: number) => Math.max(240, Math.floor(columns *
 
 const LEFT = ROW_H + RING_GAP
 
+// Slots are sized as if at least this many were drawn, so one or two
+// reported limits keep a normal bar and leave room for their figures.
+const MIN_SLOTS = 3
+
 /** Where each slot sits: its left edge, width, and where its bar starts. */
 export const bandLayout = (width: number, n: number) => {
-  const segW = (width - RIGHT_PAD - LEFT - (n - 1) * SEG_GAP) / n
+  const cols = Math.max(n, MIN_SLOTS)
+  const segW = (width - RIGHT_PAD - LEFT - (cols - 1) * SEG_GAP) / cols
   return Array.from({ length: n }, (_, i) => {
     const x = LEFT + i * (segW + SEG_GAP)
     return { x, segW, bx: x + ICON + ICON_GAP }
@@ -129,6 +150,14 @@ export const bandSvg = (width: number, ctx: number | null, ringState: RingState,
 ${s.reset ? `<text class="rst" x="${(x + segW).toFixed(1)}" y="${MID}" text-anchor="end">${esc(s.reset)}</text>` : ''}`
       })
       .join('')
+    // Fewer slots than MIN_SLOTS leave room after the last one: spell out the
+    // figures there in one line, every name kept, detail dropped to fit.
+    if (slots.length > 0 && slots.length < MIN_SLOTS) {
+      const last = layout[slots.length - 1]!
+      const start = last.x + last.segW + SEG_GAP
+      const text = spareText(slots, width - RIGHT_PAD - start)
+      if (text) body += `<text class="lbl" x="${start.toFixed(1)}" y="${MID}">${text}</text>`
+    }
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${ROW_H}" viewBox="0 0 ${width} ${ROW_H}">${STYLE}${HATCH}${ring(ctx)}${body}</svg>`
 }

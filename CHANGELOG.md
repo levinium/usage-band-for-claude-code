@@ -22,6 +22,19 @@ named from it and the Release workflow checks the tag against it.
 
 Installed copies pick up a new version with `claude plugin marketplace update`.
 
+## [0.1.5] - 2026-11-02
+
+### Changed
+- The row shows only the limits Claude reports. A limit it stops reporting (such as the 5-hour
+  session window) is hidden instead of sitting empty, and comes back when it is reported again.
+- With fewer than three limits, the bars keep their usual length and the spare room spells out
+  the figures, such as "Weekly · 2% used · resets in 4d 20h".
+
+### Fixed
+- A new chat now shows your limits straight away, from the last reading, instead of waiting for
+  its first response.
+- A response that reported no limits no longer cleared the row.
+
 ## [0.1.4] - 2026-10-28
 
 ### Changed

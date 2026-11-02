@@ -21,8 +21,16 @@ const usage = (percent: number) => ({
   },
 })
 
+// $.store for a test: one map, shared by the chats a test starts.
+const memStore = (on: any) => {
+  const kept = new Map<string, unknown>()
+  on('store.get', (_: unknown, e: { key: string }) => ({ value: kept.get(e.key) }))
+  on('store.set', (_: unknown, e: { key: string; value: unknown }) => (kept.set(e.key, e.value), { value: undefined }))
+}
+
 test('desktop: one full-width SVG with ring, bars and reset times', async ($, on) => {
   on('clock.now', () => ({ value: NOW }))
+  memStore(on)
   on('session.usage', () => usage(13))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
 
@@ -30,7 +38,7 @@ test('desktop: one full-width SVG with ring, bars and reset times', async ($, on
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
 
   const svgs = await ui.findAll({ type: 'Svg' })
-  expect(svgs).toHaveLength(5) // band, 3 slot pills, ring pill (pills hidden until hover)
+  expect(svgs).toHaveLength(4) // band, 2 slot pills, ring pill (pills hidden until hover)
   const band = svgs.find(s => String(s.props.alt).startsWith('Context'))
   const svg = String(band?.props.source)
   expect(band?.props.isInteractive).toBeUndefined() // a plain image: redraws swap in place
@@ -39,10 +47,10 @@ test('desktop: one full-width SVG with ring, bars and reset times', async ($, on
   expect(svg).toContain(RED) // Weekly 85%
   expect(svg).toContain('>4h<') // reset always shown
   expect(svg).toContain('>3d<')
-  expect(band?.props.alt).toBe('Context 13%, Session 3%, Weekly 85%, Fable no data')
+  expect(band?.props.alt).toBe('Context 13%, Session 3%, Weekly 85%')
   const alts = svgs.map(s => String(s.props.alt))
   expect(alts).toContain('Session · 3% used · resets in 4h 30m')
-  expect(alts).toContain('Fable: no data yet')
+  expect(alts.some(a => a.startsWith('Fable'))).toBe(false) // not reported, so hidden
   expect(await ui.findAll({ type: 'Client' })).toHaveLength(1)
   await ui.unmount()
 })
@@ -50,6 +58,7 @@ test('desktop: one full-width SVG with ring, bars and reset times', async ($, on
 test('ring: tooltip pill is hover-revealed, click compacts', async ($, on) => {
   let compacts = 0
   on('clock.now', () => ({ value: NOW }))
+  memStore(on)
   on('session.usage', () => usage(40))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.compact', () => {
@@ -80,6 +89,7 @@ test('ring: tooltip pill is hover-revealed, click compacts', async ($, on) => {
 test('ring: a refused compaction toasts the engine reason', async ($, on) => {
   const toasts: string[] = []
   on('clock.now', () => ({ value: NOW }))
+  memStore(on)
   on('session.usage', () => usage(65))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.compact', () => {
@@ -105,6 +115,7 @@ test('ring: a headless session compacts through the /compact command', async ($,
   const commands: string[] = []
   let compacts = 0
   on('clock.now', () => ({ value: NOW }))
+  memStore(on)
   on('session.usage', () => usage(65))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.compact', () => {
@@ -129,6 +140,7 @@ test('ring: a headless session compacts through the /compact command', async ($,
 test('vscode: same SVG band, ring click is a Button', async ($, on) => {
   let compacts = 0
   on('clock.now', () => ({ value: NOW }))
+  memStore(on)
   on('session.usage', () => usage(13))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.compact', () => {
@@ -141,8 +153,8 @@ test('vscode: same SVG band, ring click is a Button', async ($, on) => {
   const ui = await $.ui.mount({ ...BAND, surface: 'vscode' })
 
   const svgs = await ui.findAll({ type: 'Svg' })
-  expect(svgs).toHaveLength(5)
-  expect(svgs.find(s => String(s.props.alt).startsWith('Context'))?.props.alt).toBe('Context 13%, Session 3%, Weekly 85%, Fable no data')
+  expect(svgs).toHaveLength(4)
+  expect(svgs.find(s => String(s.props.alt).startsWith('Context'))?.props.alt).toBe('Context 13%, Session 3%, Weekly 85%')
   expect(await ui.findAll({ type: 'Client' })).toHaveLength(0)
 
   await ui.press({ key: 'ring' })
@@ -152,6 +164,7 @@ test('vscode: same SVG band, ring click is a Button', async ($, on) => {
 
 test('terminal falls back to text bars', async ($, on) => {
   on('clock.now', () => ({ value: NOW }))
+  memStore(on)
   on('session.usage', () => usage(13))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
 
@@ -159,29 +172,76 @@ test('terminal falls back to text bars', async ($, on) => {
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
   expect((await ui.find({ type: 'Text', text: /^█$/ }))?.props.color).toBe('success')
   expect((await ui.findAll({ type: 'Svg' })).length).toBe(0)
-  // Fable has no data: shade, not an empty bar.
-  expect(await ui.find({ type: 'Text', text: '░'.repeat(8) })).toBeDefined()
+  // Fable is not reported, so it is not drawn at all.
+  expect(await ui.find({ type: 'Text', text: '  F ' })).toBeUndefined()
   await ui.unmount()
 })
 
-test('no data is hatched with a dim icon, unlike a real 0%', async ($, on) => {
+const noUsage = (rateLimits: unknown[]) => ({
+  value: { startedAt: NOW, context: { window: 1000000, tokens: 0, percent: undefined }, rateLimits },
+})
+
+const bandOf = async (ui: { findAll: (q: { type: string }) => Promise<{ props: Record<string, unknown> }[]> }) =>
+  (await ui.findAll({ type: 'Svg' })).find(s => String(s.props.alt).startsWith('Context'))
+
+test('before any reading every slot is hatched with a dim icon', async ($, on) => {
   on('clock.now', () => ({ value: NOW }))
-  on('session.usage', () => ({
-    value: {
-      startedAt: NOW,
-      context: { window: 1000000, tokens: 0, percent: undefined },
-      rateLimits: [{ kind: 'five_hour', percentUsed: 0, resetsAt: '2026-10-27T20:30:00Z' }],
-    },
-  }))
+  memStore(on)
+  on('session.usage', () => noUsage([]))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
 
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
-  const band = (await ui.findAll({ type: 'Svg' })).find(s => String(s.props.alt).startsWith('Context'))
+  const band = await bandOf(ui)
   const svg = String(band?.props.source)
-  expect(band?.props.alt).toBe('Context not measured, Session 0%, Weekly no data, Fable no data')
+  expect(band?.props.alt).toBe('Context not measured, Session no data, Weekly no data, Fable no data')
   expect(svg).toContain('stroke-dasharray="2.5 2.5"') // ring with no context reading
-  expect(svg.match(/fill="url\(#nd\)"/g)).toHaveLength(2) // Weekly and Fable; Session is a real 0%
-  expect(svg.match(/class="nod"/g)).toHaveLength(2)
+  expect(svg.match(/fill="url\(#nd\)"/g)).toHaveLength(3)
+  expect(svg.match(/class="nod"/g)).toHaveLength(3)
+  await ui.unmount()
+})
+
+test('only the windows Claude reports are drawn; a real 0% is not hatched', async ($, on) => {
+  on('clock.now', () => ({ value: NOW }))
+  memStore(on)
+  on('session.usage', () => noUsage([{ kind: 'seven_day', percentUsed: 0, resetsAt: '2026-10-31T12:00:00Z' }]))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  const band = await bandOf(ui)
+  expect(band?.props.alt).toBe('Context not measured, Weekly 0%')
+  const svg = String(band?.props.source)
+  expect(svg).not.toContain('url(#nd)')
+  // One slot keeps a normal-width bar; the spare room spells out its figure.
+  expect(svg).toContain('<tspan>Weekly · 0% used · resets in 3d 20h</tspan>')
+  await ui.unmount()
+})
+
+test('a new chat shows the last reported windows before its first response', async ($, on) => {
+  // An earlier chat saved this reading; this chat has had no response yet.
+  const saved = [{ kind: 'seven_day', percentUsed: 12, resetsAt: '2026-10-31T12:00:00Z' }]
+  on('clock.now', () => ({ value: NOW }))
+  on('store.get', (_, e) => ({ value: e.key === 'lastLimits' ? saved : undefined }))
+  on('session.usage', () => noUsage([]))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  expect((await bandOf(ui))?.props.alt).toBe('Context not measured, Weekly 12%')
+  await ui.unmount()
+})
+
+test('a kept window that has since reset draws as no data', async ($, on) => {
+  on('clock.now', () => ({ value: NOW }))
+  memStore(on)
+  on('session.usage', () => noUsage([{ kind: 'seven_day', percentUsed: 40, resetsAt: '2026-10-27T15:00:00Z' }]))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  const band = await bandOf(ui)
+  expect(band?.props.alt).toBe('Context not measured, Weekly no data')
+  expect(String(band?.props.source)).toContain('fill="url(#nd)"')
   await ui.unmount()
 })

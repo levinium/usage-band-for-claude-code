@@ -11,8 +11,8 @@ const isCompacting = atom({ plugin: 'usage-band', key: 'isCompacting' } as const
 
 const CELLS = 8
 
-// Fixed slots, always drawn in this order; a window the engine has not
-// reported yet draws as an empty grey bar.
+// Slots in drawing order. Until any reading has come in, every slot draws
+// as "no data"; once one has, only the windows Claude reports are drawn.
 const SLOTS: { label: string; icon: Icon; match: (kind: string) => boolean }[] = [
   { label: 'Session', icon: 'clock', match: k => k === 'five_hour' },
   { label: 'Weekly', icon: 'calendar', match: k => k === 'seven_day' },
@@ -23,6 +23,19 @@ const WHEEL = ['○', '◔', '◑', '◕', '●']
 
 const toLimits = (raw: readonly Limit[]): Limit[] =>
   raw.map(r => ({ kind: r.kind, percentUsed: r.percentUsed, resetsAt: r.resetsAt }))
+
+// The windows the last response reported, kept across sessions: they are the
+// account's, so a new chat shows them before its own first response.
+const LAST_LIMITS = 'lastLimits'
+
+const isLimit = (v: unknown): v is Limit =>
+  typeof v === 'object' && v !== null && typeof (v as Limit).kind === 'string' && typeof (v as Limit).percentUsed === 'number'
+
+const keepLimits = async ($: EngineInterface, raw: readonly Limit[]) => {
+  const next = toLimits(raw)
+  await update($, limits, () => next)
+  await $.store.set(LAST_LIMITS, next)
+}
 
 const barColor = (pct: number) => (pct >= 80 ? 'error' : pct >= 50 ? 'warning' : 'success')
 
@@ -84,14 +97,23 @@ export const register: Register = on => {
     isInteractive = e.isInteractive
     const result = await next(e)
     const usage = await $.session.usage()
-    await update($, limits, () => toLimits(usage.rateLimits))
+    if (usage.rateLimits.length > 0) {
+      await keepLimits($, usage.rateLimits)
+    } else {
+      const stored = await $.store.get(LAST_LIMITS)
+      if (Array.isArray(stored) && stored.every(isLimit)) {
+        await update($, limits, () => toLimits(stored))
+      }
+    }
     await update($, contextPercent, () => usage.context.percent ?? null)
     return result
   })
 
   on('session.measure', async ($, e, next) => {
-    if (e.changed.includes('rateLimits')) {
-      await update($, limits, () => toLimits(e.rateLimits))
+    // An empty list means no reading (not "nothing reported"), so the last
+    // set stays up.
+    if (e.changed.includes('rateLimits') && e.rateLimits.length > 0) {
+      await keepLimits($, e.rateLimits)
     }
     if (e.changed.includes('context')) {
       await update($, contextPercent, () => e.context.percent ?? null)
@@ -118,10 +140,14 @@ export const register: Register = on => {
     const now = await $.clock.now()
     isWorking = e.props.isWorking
 
+    // A kept reading whose window has since reset no longer has a figure.
+    const current = (l: Limit | undefined) => (l?.resetsAt && Date.parse(l.resetsAt) <= now ? undefined : l)
     const extras = all.filter(l => !SLOTS.some(s => s.match(l.kind)))
     const rows = [
-      ...SLOTS.map(s => ({ label: s.label, icon: s.icon, limit: all.find(l => s.match(l.kind)) })),
-      ...extras.map(l => ({ label: l.kind, icon: 'dot' as Icon, limit: l as Limit | undefined })),
+      ...SLOTS.map(s => ({ label: s.label, icon: s.icon, reading: all.find(l => s.match(l.kind)) }))
+        .filter(r => all.length === 0 || r.reading)
+        .map(r => ({ label: r.label, icon: r.icon, limit: current(r.reading) })),
+      ...extras.map(l => ({ label: l.kind, icon: 'dot' as Icon, limit: current(l) })),
     ]
     const ctxPct = ctx ?? 0
 

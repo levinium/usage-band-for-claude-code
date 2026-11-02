@@ -58,12 +58,16 @@ until one of them turns amber.
 
 ## What it does
 
-### One row, three limits
+### One row, up to three limits
 
 Each limit gets an icon and a bar: a clock for the 5-hour session window, a calendar for the
-weekly limit across all models, and a spark for the weekly Fable limit. The bars stretch to
-share the width of the window evenly. Each one is green below 50%, amber from 50% and red from
-80%. The time left until that limit resets sits at the end of its bar.
+weekly limit across all models, and a spark for the weekly Fable limit. Each one is green below
+50%, amber from 50% and red from 80%. The time left until that limit resets sits at the end of
+its bar.
+
+Only the limits Claude reports are shown. When there are fewer than three, the bars keep their
+usual length and the spare room spells out the figures. A new chat shows the last reading
+straight away, and each reply brings it up to date.
 
 ### Hover for the figures
 
@@ -100,8 +104,8 @@ click-to-compact, light and dark themes, resizing, and the text version in a ter
 
 **Known rough edges:**
 
-- The Fable bar shows only when your account reports a Fable limit. Until then it stays grey
-  and its hover says "no data yet".
+- Claude does not always report every limit. When a limit is not reported it is hidden,
+  even where Claude Code's own `/usage` screen shows it (`/usage` reads it from elsewhere).
 - The desktop app reports the band's width in text columns, not pixels, so the band converts
   at 8 pixels a column. If the bars stop short of the right edge or run past it, that number is
   the one to change, in `hooks/svg.ts`.
