@@ -11,7 +11,9 @@ const isCompacting = atom({ plugin: 'usage-band', key: 'isCompacting' } as const
 
 const CELLS = 8
 // Columns kept for VS Code's Compact button, chrome included.
-const COMPACT_COLS = 10
+const COMPACT_COLS = 12
+// VS Code pads its band on both sides inside the width it reports.
+const VSCODE_PAD_COLS = 3
 
 // Slots in drawing order. Until any reading has come in, every slot draws
 // as "no data"; once one has, only the windows Claude reports are drawn.
@@ -191,9 +193,11 @@ export const register: Register = on => {
         // VS Code draws every Button with its own chrome, so nothing invisible
         // can lie over the ring: the ring stands alone, a Compact button follows
         // it, then the bars in the rest of the row.
-        const barsW = width - ROW_H - (COMPACT_COLS + 2) * PX_PER_COL
+        // The row never wraps: if the button runs wider than the room kept for
+        // it, the bars' right end is cut instead of the bars dropping a line.
+        const barsW = width - ROW_H - (COMPACT_COLS + 2 + VSCODE_PAD_COLS) * PX_PER_COL
         return (
-          <Box flexDirection="row" alignItems="center" columnGap={1} width="100%">
+          <Box flexDirection="row" flexWrap="nowrap" alignItems="center" columnGap={1} width="100%">
             <Box key="ring" position="relative">
               <Svg source={ringSvg(ctx)} alt={ctx === null ? 'Context not measured yet' : `${ctx}% of context used`} width={ROW_H} height={ROW_H} />
               <Box display="none" hover={{ display: 'flex' }} position="absolute" left={RING_COLS} top={0}>
@@ -201,7 +205,7 @@ export const register: Register = on => {
               </Box>
             </Box>
             <Button key="compact" label="Compact" onPress={() => compact($, e.props.isWorking, isInteractive)} />
-            <Box position="relative">
+            <Box position="relative" flexShrink={1} minWidth={0} overflow="hidden">
               <Svg source={bandSvg(barsW, ctx, ringState, slots, false)} alt={alt} width={barsW} height={ROW_H} />
               {slotHovers(barsW, 0)}
             </Box>

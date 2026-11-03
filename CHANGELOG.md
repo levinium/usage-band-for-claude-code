@@ -22,6 +22,12 @@ named from it and the Release workflow checks the tag against it.
 
 Installed copies pick up a new version with `claude plugin marketplace update`.
 
+## [0.1.7] - 2026-11-03
+
+### Fixed
+- In VS Code, the bars no longer drop to a second line after the Compact button. The row
+  keeps room for the button and VS Code's padding, and never wraps.
+
 ## [0.1.6] - 2026-11-03
 
 ### Fixed
