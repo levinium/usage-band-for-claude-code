@@ -87,8 +87,10 @@ same as typing `/compact`. During a turn it waits and tells you so.
 
 ### In VS Code
 
-The Claude Code extension for VS Code draws the same row as the desktop app, ring click
-included. It needs a version of the extension that runs mods.
+The Claude Code extension for VS Code draws the same row as the desktop app, with one
+difference: a Compact button sits just right of the ring, because VS Code gives every button
+its own styling and an invisible one over the ring is not possible there. It needs a version
+of the extension that runs mods.
 
 ### In a terminal
 

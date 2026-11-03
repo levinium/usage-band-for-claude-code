@@ -22,6 +22,13 @@ named from it and the Release workflow checks the tag against it.
 
 Installed copies pick up a new version with `claude plugin marketplace update`.
 
+## [0.1.6] - 2026-11-03
+
+### Fixed
+- In VS Code, compacting is now a Compact button just right of the context ring. VS Code
+  draws every button with its own styling, so the invisible click area over the ring showed
+  up there as a small blue bar that moved when clicked. The desktop app is unchanged.
+
 ## [0.1.5] - 2026-11-02
 
 ### Changed

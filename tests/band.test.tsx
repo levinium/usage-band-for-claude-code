@@ -137,7 +137,7 @@ test('ring: a headless session compacts through the /compact command', async ($,
   await ui.unmount()
 })
 
-test('vscode: same SVG band, ring click is a Button', async ($, on) => {
+test('vscode: ring, then a Compact button, then the bars', async ($, on) => {
   let compacts = 0
   on('clock.now', () => ({ value: NOW }))
   memStore(on)
@@ -153,11 +153,16 @@ test('vscode: same SVG band, ring click is a Button', async ($, on) => {
   const ui = await $.ui.mount({ ...BAND, surface: 'vscode' })
 
   const svgs = await ui.findAll({ type: 'Svg' })
-  expect(svgs).toHaveLength(4)
-  expect(svgs.find(s => String(s.props.alt).startsWith('Context'))?.props.alt).toBe('Context 13%, Session 3%, Weekly 85%')
+  expect(svgs).toHaveLength(5) // ring, bars, 2 slot pills, ring pill
+  expect(svgs.map(s => s.props.alt)).toContain('13% of context used')
+  const bars = svgs.find(s => String(s.props.alt).startsWith('Context'))
+  expect(bars?.props.alt).toBe('Context 13%, Session 3%, Weekly 85%')
+  // The bars are drawn without the ring, which sits in its own image.
+  expect(String(bars?.props.source)).not.toContain(`r="7"`)
   expect(await ui.findAll({ type: 'Client' })).toHaveLength(0)
+  expect((await ui.find({ type: 'Button', key: 'compact' }))?.props.label).toBe('Compact')
 
-  await ui.press({ key: 'ring' })
+  await ui.press({ key: 'compact' })
   expect(compacts).toBe(1)
   await ui.unmount()
 })

@@ -114,12 +114,16 @@ const LEFT = ROW_H + RING_GAP
 // reported limits keep a normal bar and leave room for their figures.
 const MIN_SLOTS = 3
 
-/** Where each slot sits: its left edge, width, and where its bar starts. */
-export const bandLayout = (width: number, n: number) => {
+/**
+ * Where each slot sits: its left edge, width, and where its bar starts.
+ * `left` is where the first slot starts: after the ring, or 0 for bars drawn
+ * without it (VS Code puts the ring and a button before them).
+ */
+export const bandLayout = (width: number, n: number, left = LEFT) => {
   const cols = Math.max(n, MIN_SLOTS)
-  const segW = (width - RIGHT_PAD - LEFT - (cols - 1) * SEG_GAP) / cols
+  const segW = (width - RIGHT_PAD - left - (cols - 1) * SEG_GAP) / cols
   return Array.from({ length: n }, (_, i) => {
-    const x = LEFT + i * (segW + SEG_GAP)
+    const x = left + i * (segW + SEG_GAP)
     return { x, segW, bx: x + ICON + ICON_GAP }
   })
 }
@@ -128,12 +132,13 @@ export const bandLayout = (width: number, n: number) => {
  * The band as a plain image (no hover inside it): a redraw swaps the image in
  * place, so resizing never rebuilds a frame. Hover pop-ups are separate.
  */
-export const bandSvg = (width: number, ctx: number | null, ringState: RingState, slots: BarSlot[]) => {
+export const bandSvg = (width: number, ctx: number | null, ringState: RingState, slots: BarSlot[], withRing = true) => {
+  const left = withRing ? LEFT : 0
   let body: string
   if (ringState === 'compacting') {
-    body = `<text class="lbl" x="${LEFT}" y="${MID}">Compacting conversation…</text>`
+    body = `<text class="lbl" x="${left}" y="${MID}">Compacting conversation…</text>`
   } else {
-    const layout = bandLayout(width, slots.length)
+    const layout = bandLayout(width, slots.length, left)
     body = slots
       .map((s, i) => {
         const { x, segW, bx } = layout[i]!
@@ -159,8 +164,12 @@ ${s.reset ? `<text class="rst" x="${(x + segW).toFixed(1)}" y="${MID}" text-anch
       if (text) body += `<text class="lbl" x="${start.toFixed(1)}" y="${MID}">${text}</text>`
     }
   }
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${ROW_H}" viewBox="0 0 ${width} ${ROW_H}">${STYLE}${HATCH}${ring(ctx)}${body}</svg>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${ROW_H}" viewBox="0 0 ${width} ${ROW_H}">${STYLE}${HATCH}${withRing ? ring(ctx) : ''}${body}</svg>`
 }
+
+/** The ring alone, for VS Code, where it sits outside the bars. */
+export const ringSvg = (ctx: number | null) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" width="${ROW_H}" height="${ROW_H}" viewBox="0 0 ${ROW_H} ${ROW_H}">${STYLE}${ring(ctx)}</svg>`
 
 /** An opaque rounded pill holding one line of text, following the app theme. */
 export const pillSvg = (text: string, width: number) =>
@@ -176,5 +185,7 @@ export const slotTipText = (s: BarSlot, pillWidth: number) =>
 export const TIP_W = 250
 
 /** The ring's hover tooltip, drawn over the start of the bars. */
-export const ringTipSvg = (ctx: number | null) =>
-  pillSvg(`Click to compact · ${ctx === null ? 'context not measured yet' : `${ctx}% of context used`}`, TIP_W)
+export const ringTipSvg = (ctx: number | null, clickable = true) => {
+  const used = ctx === null ? 'context not measured yet' : `${ctx}% of context used`
+  return pillSvg(clickable ? `Click to compact · ${used}` : used.charAt(0).toUpperCase() + used.slice(1), TIP_W)
+}

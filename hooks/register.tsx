@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Limit } from '../types'
-import { PX_PER_COL, RING_COLS, ROW_H, TIP_W, bandLayout, bandSvg, bandWidth, pillSvg, ringTipSvg, slotTipText } from './svg'
+import { PX_PER_COL, RING_COLS, ROW_H, TIP_W, bandLayout, bandSvg, bandWidth, pillSvg, ringSvg, ringTipSvg, slotTipText } from './svg'
 import type { BarSlot, Icon } from './svg'
 
 const limits = atom({ plugin: 'usage-band', key: 'limits' } as const, [] as Limit[])
@@ -10,6 +10,8 @@ const contextPercent = atom({ plugin: 'usage-band', key: 'contextPercent' } as c
 const isCompacting = atom({ plugin: 'usage-band', key: 'isCompacting' } as const, false)
 
 const CELLS = 8
+// Columns kept for VS Code's Compact button, chrome included.
+const COMPACT_COLS = 10
 
 // Slots in drawing order. Until any reading has come in, every slot draws
 // as "no data"; once one has, only the windows Claude reports are drawn.
@@ -163,40 +165,58 @@ export const register: Register = on => {
       }))
       const alt = [`Context ${ctx === null ? 'not measured' : `${ctxPct}%`}`, ...slots.map(s => `${s.name} ${s.pct === null ? 'no data' : `${s.pct}%`}`)].join(', ')
       const width = bandWidth(e.props.bodyColumns)
-      const layout = bandLayout(width, slots.length)
       // The band is a plain image, so redraws (a resize) swap it in place.
       // Hover lives in layers above it: a keyed Box per slot reveals that
-      // slot's pill, a display toggle that never redraws the band. Over the
-      // ring, an invisible Client takes the clicks an image cannot; VS Code
-      // has no Client, so a plain Button of blank cells stands in.
-      let ringHit
-      if (e.surface === 'desktop') {
-        const { Client } = $.ui.resolve(e)
-        ringHit = <Client key="ring" module="./ring-hit.tsx" width={RING_COLS} height={1} />
-      } else {
-        ringHit = <Button key="ring" plain label={' '.repeat(RING_COLS)} onPress={() => compact($, e.props.isWorking, isInteractive)} />
+      // slot's pill, a display toggle that never redraws the band.
+      const slotHovers = (barsWidth: number, left?: number) => {
+        if (ringState !== 'idle') return null
+        const layout = bandLayout(barsWidth, slots.length, left)
+        return slots.map((s, i) => {
+          const { x, segW, bx } = layout[i]!
+          const zoneLeft = Math.floor(x / PX_PER_COL)
+          const zoneCols = Math.ceil((x + segW) / PX_PER_COL) - zoneLeft
+          const pillLeft = Math.floor(bx / PX_PER_COL)
+          const pillW = (zoneLeft + zoneCols - pillLeft) * PX_PER_COL
+          return (
+            <Box key={`slot-${s.name}`} position="absolute" left={zoneLeft} top={0} width={zoneCols} height={1}>
+              <Box display="none" hover={{ display: 'flex' }} position="absolute" left={pillLeft - zoneLeft} top={0}>
+                <Svg source={pillSvg(slotTipText(s, pillW), pillW)} alt={slotTipText(s, pillW)} width={pillW} height={ROW_H} />
+              </Box>
+            </Box>
+          )
+        })
       }
+
+      if (e.surface === 'vscode') {
+        // VS Code draws every Button with its own chrome, so nothing invisible
+        // can lie over the ring: the ring stands alone, a Compact button follows
+        // it, then the bars in the rest of the row.
+        const barsW = width - ROW_H - (COMPACT_COLS + 2) * PX_PER_COL
+        return (
+          <Box flexDirection="row" alignItems="center" columnGap={1} width="100%">
+            <Box key="ring" position="relative">
+              <Svg source={ringSvg(ctx)} alt={ctx === null ? 'Context not measured yet' : `${ctx}% of context used`} width={ROW_H} height={ROW_H} />
+              <Box display="none" hover={{ display: 'flex' }} position="absolute" left={RING_COLS} top={0}>
+                <Svg source={ringTipSvg(ctx, false)} alt="How full the context is" width={TIP_W} height={ROW_H} />
+              </Box>
+            </Box>
+            <Button key="compact" label="Compact" onPress={() => compact($, e.props.isWorking, isInteractive)} />
+            <Box position="relative">
+              <Svg source={bandSvg(barsW, ctx, ringState, slots, false)} alt={alt} width={barsW} height={ROW_H} />
+              {slotHovers(barsW, 0)}
+            </Box>
+          </Box>
+        )
+      }
+
+      // Over the ring, an invisible Client takes the clicks an image cannot.
+      const { Client } = $.ui.resolve(e)
       return (
         <Box position="relative" width="100%">
           <Svg source={bandSvg(width, ctx, ringState, slots)} alt={alt} width={width} height={ROW_H} />
-          {ringState === 'idle'
-            ? slots.map((s, i) => {
-                const { x, segW, bx } = layout[i]!
-                const zoneLeft = Math.floor(x / PX_PER_COL)
-                const zoneCols = Math.ceil((x + segW) / PX_PER_COL) - zoneLeft
-                const pillLeft = Math.floor(bx / PX_PER_COL)
-                const pillW = (zoneLeft + zoneCols - pillLeft) * PX_PER_COL
-                return (
-                  <Box key={`slot-${s.name}`} position="absolute" left={zoneLeft} top={0} width={zoneCols} height={1}>
-                    <Box display="none" hover={{ display: 'flex' }} position="absolute" left={pillLeft - zoneLeft} top={0}>
-                      <Svg source={pillSvg(slotTipText(s, pillW), pillW)} alt={slotTipText(s, pillW)} width={pillW} height={ROW_H} />
-                    </Box>
-                  </Box>
-                )
-              })
-            : null}
+          {slotHovers(width)}
           <Box key="ring" position="absolute" left={0} top={0} flexDirection="row">
-            {ringHit}
+            <Client key="ring" module="./ring-hit.tsx" width={RING_COLS} height={1} />
             <Box display="none" hover={{ display: 'flex' }}>
               <Svg source={ringTipSvg(ctx)} alt="Click to compact" width={TIP_W} height={ROW_H} />
             </Box>
