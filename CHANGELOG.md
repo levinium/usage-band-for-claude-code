@@ -22,6 +22,13 @@ named from it and the Release workflow checks the tag against it.
 
 Installed copies pick up a new version with `claude plugin marketplace update`.
 
+## [0.1.8] - 2026-11-05
+
+### Fixed
+- The context ring now shrinks as soon as a compaction finishes, instead of waiting for the
+  next response. When Claude Code does not report the compacted size, the ring shows as not
+  measured until that response.
+
 ## [0.1.7] - 2026-11-03
 
 ### Fixed

@@ -125,6 +125,19 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // A compaction shrinks the context, but the next measure comes only with
+  // the next response; size the ring from the compacted count meanwhile, or
+  // show it unmeasured when core did not record one.
+  on('session.compact', async ($, e, next) => {
+    const result = await next(e)
+    if (e.trigger !== 'precompute' && e.agentId === undefined && result.messages) {
+      const { context } = await $.session.usage()
+      const pct = result.tokensAfter !== undefined && context.window > 0 ? Math.round((result.tokensAfter / context.window) * 100) : null
+      await update($, contextPercent, () => pct)
+    }
+    return result
+  })
+
   // The ring's hit area (ring-hit.tsx) reports clicks.
   on('ui.message', async ($, e, next) => {
     const data = e.data as { press?: boolean } | null

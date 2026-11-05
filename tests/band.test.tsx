@@ -86,6 +86,26 @@ test('ring: tooltip pill is hover-revealed, click compacts', async ($, on) => {
   await ui.unmount()
 })
 
+test('ring: a compaction resizes the ring before the next response', async ($, on) => {
+  on('clock.now', () => ({ value: NOW }))
+  memStore(on)
+  on('session.usage', () => usage(65))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  const kept = [{ role: 'user' as const, text: 'Summary of the conversation so far', toolUses: [] }]
+  on('session.compact', () => ({ messages: kept, tokensBefore: 650000, tokensAfter: 40000 }))
+  on('ui.toast', () => ({ value: undefined }))
+
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  expect((await bandOf(ui))?.props.alt).toMatch(/^Context 65%/)
+  await $.session.compact({ trigger: 'manual', messages: kept })
+  expect((await bandOf(ui))?.props.alt).toMatch(/^Context 4%/)
+  // A subagent's compaction leaves the main ring alone.
+  await $.session.compact({ trigger: 'auto', agentId: 'a1', messages: kept })
+  expect((await bandOf(ui))?.props.alt).toMatch(/^Context 4%/)
+  await ui.unmount()
+})
+
 test('ring: a refused compaction toasts the engine reason', async ($, on) => {
   const toasts: string[] = []
   on('clock.now', () => ({ value: NOW }))
