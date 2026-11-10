@@ -1,13 +1,22 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, RenderInput } from 'claude-code'
 
-import type { Limit } from '../types'
+import type { Limit, WaitingItem } from '../types'
 import { PX_PER_COL, RING_COLS, ROW_H, TIP_W, bandLayout, bandSvg, bandWidth, pillSvg, ringSvg, ringTipSvg, slotTipText } from './svg'
 import type { BarSlot, Icon } from './svg'
 
 const limits = atom({ plugin: 'usage-band', key: 'limits' } as const, [] as Limit[])
 const contextPercent = atom({ plugin: 'usage-band', key: 'contextPercent' } as const, null as number | null)
 const isCompacting = atom({ plugin: 'usage-band', key: 'isCompacting' } as const, false)
+// Background work the session waits on, as of the last turn's end, and a tick
+// that redraws the waiting times.
+const waiting = atom({ plugin: 'usage-band', key: 'waiting' } as const, [] as WaitingItem[])
+const tick = atom({ plugin: 'usage-band', key: 'tick' } as const, 0)
+
+const TICK_MS = 15_000
+const LABEL_MAX = 80
+
+type BandEvent = RenderInput<'AbovePrompt'>
 
 const CELLS = 8
 // Columns kept for VS Code's Compact button, chrome included.
@@ -65,6 +74,30 @@ const resetsIn = (resetsAt: string | undefined, now: number) => {
   if (mins >= 1440) return `${Math.floor(mins / 1440)}d`
   if (mins >= 60) return `${Math.floor(mins / 60)}h`
   return `${mins}m`
+}
+
+type TaskSummary = { id: string; type: string; description: string; command?: string; name?: string }
+type CronSummary = { id: string; schedule: string; prompt: string }
+
+const oneLine = (text: string) => {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  return flat.length > LABEL_MAX ? `${flat.slice(0, LABEL_MAX - 1)}…` : flat
+}
+
+const taskLabel = (t: TaskSummary) => {
+  if (t.type === 'workflow' && t.name) return oneLine(t.name)
+  if (t.description) return oneLine(t.description)
+  if (t.command) return oneLine(t.command)
+  return t.type
+}
+
+// "45s", "12m", "1h 05m".
+export const waitedFor = (ms: number) => {
+  const sec = Math.max(0, Math.floor(ms / 1000))
+  if (sec < 60) return `${sec}s`
+  const min = Math.floor(sec / 60)
+  if (min < 60) return `${min}m`
+  return `${Math.floor(min / 60)}h ${String(min % 60).padStart(2, '0')}m`
 }
 
 const compact = async ($: EngineInterface, isWorking: boolean, isInteractive: boolean) => {
@@ -138,6 +171,45 @@ export const register: Register = on => {
     return result
   })
 
+  // A turn ended. Background work or a scheduled wake-up still pending means the
+  // session is waiting, not done: keep the list for the rows above the band.
+  let ticker: { cancel: () => void } | undefined
+  const started = new Map<string, number>()
+  on('classic.Stop', async ($, e, next) => {
+    const result = await next(e)
+    if (e.agent_id !== undefined || result.block) return result
+
+    const tasks = (e.background_tasks ?? []) as TaskSummary[]
+    const crons = (e.session_crons ?? []) as CronSummary[]
+    const now = await $.clock.now()
+    const before = new Map((await read($, waiting)).map(w => [w.id, w.since]))
+    const items: WaitingItem[] = [
+      ...tasks.map(t => ({ id: t.id, kind: t.type, label: taskLabel(t), since: started.get(t.id) ?? before.get(t.id) ?? now })),
+      ...crons.map(c => ({ id: c.id, kind: 'scheduled', label: oneLine(c.prompt) || c.schedule, since: before.get(c.id) ?? now })),
+    ]
+    for (const id of [...started.keys()]) if (!items.some(i => i.id === id)) started.delete(id)
+    await update($, waiting, () => items)
+
+    ticker?.cancel()
+    ticker = items.length > 0 ? $.clock.every(TICK_MS, () => void update($, tick, n => n + 1)) : undefined
+    return result
+  }).catch(($, e, next) => next(e))
+
+  // Start times, by task id, from the call that sent the work to the background.
+  on('tool.call', async ($, e, next) => {
+    const r = await next(e)
+    if (e.agentId !== undefined) return r
+    const rec = (r as { result?: unknown }).result
+    if (rec && typeof rec === 'object') {
+      const o = rec as Record<string, unknown>
+      for (const key of ['backgroundTaskId', 'taskId', 'agentId']) {
+        const id = o[key]
+        if (typeof id === 'string' && !started.has(id)) started.set(id, await $.clock.now())
+      }
+    }
+    return r
+  }).catch(($, e, next) => next(e))
+
   // The ring's hit area (ring-hit.tsx) reports clicks.
   on('ui.message', async ($, e, next) => {
     const data = e.data as { press?: boolean } | null
@@ -152,122 +224,158 @@ export const register: Register = on => {
       return next(e)
     }
 
-    const all = await read($, limits)
-    const ctx = await read($, contextPercent)
-    const now = await $.clock.now()
+    // Other plugins' rows go on top and the band stays on the prompt, whichever
+    // plugin loaded first. The waiting rows sit between, hidden while a turn runs.
+    const others = await next(e)
+    const items = await read($, waiting)
+    const waitingRows = await drawWaiting($, e, items)
     isWorking = e.props.isWorking
+    const band = await drawBand($, e, isInteractive)
+    if (!others && !waitingRows) return band
 
-    // A kept reading whose window has since reset no longer has a figure.
-    const current = (l: Limit | undefined) => (l?.resetsAt && Date.parse(l.resetsAt) <= now ? undefined : l)
-    const extras = all.filter(l => !SLOTS.some(s => s.match(l.kind)))
-    const rows = [
-      ...SLOTS.map(s => ({ label: s.label, icon: s.icon, reading: all.find(l => s.match(l.kind)) }))
-        .filter(r => all.length === 0 || r.reading)
-        .map(r => ({ label: r.label, icon: r.icon, limit: current(r.reading) })),
-      ...extras.map(l => ({ label: l.kind, icon: 'dot' as Icon, limit: current(l) })),
-    ]
-    const ctxPct = ctx ?? 0
+    const { Box } = $.ui.resolve(e)
+    return (
+      <Box flexDirection="column">
+        {others}
+        {waitingRows}
+        {band}
+      </Box>
+    )
+  })
+}
 
-    if (e.surface === 'desktop' || e.surface === 'vscode') {
-      const { Box, Svg, Button } = $.ui.resolve(e)
-      const ringState = (await read($, isCompacting)) ? 'compacting' : 'idle'
-      const slots: BarSlot[] = rows.map(r => ({
-        icon: r.icon,
-        name: r.label,
-        pct: r.limit ? r.limit.percentUsed : null,
-        reset: resetsIn(r.limit?.resetsAt, now),
-        resetLong: resetsInLong(r.limit?.resetsAt, now),
-      }))
-      const alt = [`Context ${ctx === null ? 'not measured' : `${ctxPct}%`}`, ...slots.map(s => `${s.name} ${s.pct === null ? 'no data' : `${s.pct}%`}`)].join(', ')
-      const width = bandWidth(e.props.bodyColumns)
-      // The band is a plain image, so redraws (a resize) swap it in place.
-      // Hover lives in layers above it: a keyed Box per slot reveals that
-      // slot's pill, a display toggle that never redraws the band.
-      const slotHovers = (barsWidth: number, left?: number) => {
-        if (ringState !== 'idle') return null
-        const layout = bandLayout(barsWidth, slots.length, left)
-        return slots.map((s, i) => {
-          const { x, segW, bx } = layout[i]!
-          const zoneLeft = Math.floor(x / PX_PER_COL)
-          const zoneCols = Math.ceil((x + segW) / PX_PER_COL) - zoneLeft
-          const pillLeft = Math.floor(bx / PX_PER_COL)
-          const pillW = (zoneLeft + zoneCols - pillLeft) * PX_PER_COL
-          return (
-            <Box key={`slot-${s.name}`} position="absolute" left={zoneLeft} top={0} width={zoneCols} height={1}>
-              <Box display="none" hover={{ display: 'flex' }} position="absolute" left={pillLeft - zoneLeft} top={0}>
-                <Svg source={pillSvg(slotTipText(s, pillW), pillW)} alt={slotTipText(s, pillW)} width={pillW} height={ROW_H} />
-              </Box>
-            </Box>
-          )
-        })
-      }
+async function drawBand($: EngineInterface, e: BandEvent, isInteractive: boolean) {
+  const all = await read($, limits)
+  const ctx = await read($, contextPercent)
+  const now = await $.clock.now()
 
-      if (e.surface === 'vscode') {
-        // VS Code draws every Button with its own chrome, so nothing invisible
-        // can lie over the ring: the ring stands alone, a Compact button follows
-        // it, then the bars in the rest of the row.
-        // The row never wraps: if the button runs wider than the room kept for
-        // it, the bars' right end is cut instead of the bars dropping a line.
-        const barsW = width - ROW_H - (COMPACT_COLS + 2 + VSCODE_PAD_COLS) * PX_PER_COL
+  // A kept reading whose window has since reset no longer has a figure.
+  const current = (l: Limit | undefined) => (l?.resetsAt && Date.parse(l.resetsAt) <= now ? undefined : l)
+  const extras = all.filter(l => !SLOTS.some(s => s.match(l.kind)))
+  const rows = [
+    ...SLOTS.map(s => ({ label: s.label, icon: s.icon, reading: all.find(l => s.match(l.kind)) }))
+      .filter(r => all.length === 0 || r.reading)
+      .map(r => ({ label: r.label, icon: r.icon, limit: current(r.reading) })),
+    ...extras.map(l => ({ label: l.kind, icon: 'dot' as Icon, limit: current(l) })),
+  ]
+  const ctxPct = ctx ?? 0
+
+  if (e.surface === 'desktop' || e.surface === 'vscode') {
+    const { Box, Svg, Button } = $.ui.resolve(e)
+    const ringState = (await read($, isCompacting)) ? 'compacting' : 'idle'
+    const slots: BarSlot[] = rows.map(r => ({
+      icon: r.icon,
+      name: r.label,
+      pct: r.limit ? r.limit.percentUsed : null,
+      reset: resetsIn(r.limit?.resetsAt, now),
+      resetLong: resetsInLong(r.limit?.resetsAt, now),
+    }))
+    const alt = [`Context ${ctx === null ? 'not measured' : `${ctxPct}%`}`, ...slots.map(s => `${s.name} ${s.pct === null ? 'no data' : `${s.pct}%`}`)].join(', ')
+    const width = bandWidth(e.props.bodyColumns)
+    // The band is a plain image, so redraws (a resize) swap it in place.
+    // Hover lives in layers above it: a keyed Box per slot reveals that
+    // slot's pill, a display toggle that never redraws the band.
+    const slotHovers = (barsWidth: number, left?: number) => {
+      if (ringState !== 'idle') return null
+      const layout = bandLayout(barsWidth, slots.length, left)
+      return slots.map((s, i) => {
+        const { x, segW, bx } = layout[i]!
+        const zoneLeft = Math.floor(x / PX_PER_COL)
+        const zoneCols = Math.ceil((x + segW) / PX_PER_COL) - zoneLeft
+        const pillLeft = Math.floor(bx / PX_PER_COL)
+        const pillW = (zoneLeft + zoneCols - pillLeft) * PX_PER_COL
         return (
-          <Box flexDirection="row" flexWrap="nowrap" alignItems="center" columnGap={1} width="100%">
-            <Box key="ring" position="relative">
-              <Svg source={ringSvg(ctx)} alt={ctx === null ? 'Context not measured yet' : `${ctx}% of context used`} width={ROW_H} height={ROW_H} />
-              <Box display="none" hover={{ display: 'flex' }} position="absolute" left={RING_COLS} top={0}>
-                <Svg source={ringTipSvg(ctx, false)} alt="How full the context is" width={TIP_W} height={ROW_H} />
-              </Box>
-            </Box>
-            <Button key="compact" label="Compact" onPress={() => compact($, e.props.isWorking, isInteractive)} />
-            <Box position="relative" flexShrink={1} minWidth={0} overflow="hidden">
-              <Svg source={bandSvg(barsW, ctx, ringState, slots, false)} alt={alt} width={barsW} height={ROW_H} />
-              {slotHovers(barsW, 0)}
+          <Box key={`slot-${s.name}`} position="absolute" left={zoneLeft} top={0} width={zoneCols} height={1}>
+            <Box display="none" hover={{ display: 'flex' }} position="absolute" left={pillLeft - zoneLeft} top={0}>
+              <Svg source={pillSvg(slotTipText(s, pillW), pillW)} alt={slotTipText(s, pillW)} width={pillW} height={ROW_H} />
             </Box>
           </Box>
         )
-      }
+      })
+    }
 
-      // Over the ring, an invisible Client takes the clicks an image cannot.
-      const { Client } = $.ui.resolve(e)
+    if (e.surface === 'vscode') {
+      // VS Code draws every Button with its own chrome, so nothing invisible
+      // can lie over the ring: the ring stands alone, a Compact button follows
+      // it, then the bars in the rest of the row.
+      // The row never wraps: if the button runs wider than the room kept for
+      // it, the bars' right end is cut instead of the bars dropping a line.
+      const barsW = width - ROW_H - (COMPACT_COLS + 2 + VSCODE_PAD_COLS) * PX_PER_COL
       return (
-        <Box position="relative" width="100%">
-          <Svg source={bandSvg(width, ctx, ringState, slots)} alt={alt} width={width} height={ROW_H} />
-          {slotHovers(width)}
-          <Box key="ring" position="absolute" left={0} top={0} flexDirection="row">
-            <Client key="ring" module="./ring-hit.tsx" width={RING_COLS} height={1} />
-            <Box display="none" hover={{ display: 'flex' }}>
-              <Svg source={ringTipSvg(ctx)} alt="Click to compact" width={TIP_W} height={ROW_H} />
+        <Box flexDirection="row" flexWrap="nowrap" alignItems="center" columnGap={1} width="100%">
+          <Box key="ring" position="relative">
+            <Svg source={ringSvg(ctx)} alt={ctx === null ? 'Context not measured yet' : `${ctx}% of context used`} width={ROW_H} height={ROW_H} />
+            <Box display="none" hover={{ display: 'flex' }} position="absolute" left={RING_COLS} top={0}>
+              <Svg source={ringTipSvg(ctx, false)} alt="How full the context is" width={TIP_W} height={ROW_H} />
             </Box>
+          </Box>
+          <Button key="compact" label="Compact" onPress={() => compact($, e.props.isWorking, isInteractive)} />
+          <Box position="relative" flexShrink={1} minWidth={0} overflow="hidden">
+            <Svg source={bandSvg(barsW, ctx, ringState, slots, false)} alt={alt} width={barsW} height={ROW_H} />
+            {slotHovers(barsW, 0)}
           </Box>
         </Box>
       )
     }
 
-    const { Box, Button, Text } = $.ui.resolve(e)
+    // Over the ring, an invisible Client takes the clicks an image cannot.
+    const { Client } = $.ui.resolve(e)
     return (
-      <Box flexDirection="row">
-        <Button key="compact" plain onPress={() => compact($, e.props.isWorking, isInteractive)}>
-          <Text color={ctx === null ? 'inactive' : barColor(ctxPct)}>{wheelGlyph(ctxPct)}</Text>
-        </Button>
-        {rows.map(({ label, limit }) => {
-          const pct = limit?.percentUsed ?? 0
-          const filled = filledCells(pct)
-          // No data yet draws as shade, not as an empty (0%) bar.
-          return (
-            <Box key={label} flexDirection="row">
-              <Text dimColor>{`  ${label[0]} `}</Text>
-              {limit ? (
-                <Box flexDirection="row">
-                  <Text color={barColor(pct)}>{'█'.repeat(filled)}</Text>
-                  <Text color="inactive">{'█'.repeat(CELLS - filled)}</Text>
-                </Box>
-              ) : (
-                <Text color="inactive">{'░'.repeat(CELLS)}</Text>
-              )}
-              <Text dimColor>{` ${resetsIn(limit?.resetsAt, now)}`}</Text>
-            </Box>
-          )
-        })}
+      <Box position="relative" width="100%">
+        <Svg source={bandSvg(width, ctx, ringState, slots)} alt={alt} width={width} height={ROW_H} />
+        {slotHovers(width)}
+        <Box key="ring" position="absolute" left={0} top={0} flexDirection="row">
+          <Client key="ring" module="./ring-hit.tsx" width={RING_COLS} height={1} />
+          <Box display="none" hover={{ display: 'flex' }}>
+            <Svg source={ringTipSvg(ctx)} alt="Click to compact" width={TIP_W} height={ROW_H} />
+          </Box>
+        </Box>
       </Box>
     )
-  })
+  }
+
+  const { Box, Button, Text } = $.ui.resolve(e)
+  return (
+    <Box flexDirection="row">
+      <Button key="compact" plain onPress={() => compact($, e.props.isWorking, isInteractive)}>
+        <Text color={ctx === null ? 'inactive' : barColor(ctxPct)}>{wheelGlyph(ctxPct)}</Text>
+      </Button>
+      {rows.map(({ label, limit }) => {
+        const pct = limit?.percentUsed ?? 0
+        const filled = filledCells(pct)
+        // No data yet draws as shade, not as an empty (0%) bar.
+        return (
+          <Box key={label} flexDirection="row">
+            <Text dimColor>{`  ${label[0]} `}</Text>
+            {limit ? (
+              <Box flexDirection="row">
+                <Text color={barColor(pct)}>{'█'.repeat(filled)}</Text>
+                <Text color="inactive">{'█'.repeat(CELLS - filled)}</Text>
+              </Box>
+            ) : (
+              <Text color="inactive">{'░'.repeat(CELLS)}</Text>
+            )}
+            <Text dimColor>{` ${resetsIn(limit?.resetsAt, now)}`}</Text>
+          </Box>
+        )
+      })}
+    </Box>
+  )
+}
+
+async function drawWaiting($: EngineInterface, e: BandEvent, items: readonly WaitingItem[]) {
+  if (e.props.isWorking || items.length === 0) return null
+  await read($, tick)
+  const now = await $.clock.now()
+  const { Box, Text } = $.ui.resolve(e)
+  return (
+    <Box key="waiting" flexDirection="column">
+      <Text color="warning">{`⏳ Waiting in Background (${items.length})`}</Text>
+      {items.map(item => (
+        <Text key={`wait-${item.id}`} dimColor wrap="truncate-end">
+          {`   ${item.kind}: ${item.label} · ${item.kind === 'scheduled' ? 'scheduled' : 'running'} ${waitedFor(now - item.since)}`}
+        </Text>
+      ))}
+    </Box>
+  )
 }

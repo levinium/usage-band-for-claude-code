@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 const BAND = {
   plugin: 'usage-band',
   component: 'AbovePrompt',
-  props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 99, scroll: { offset: 0, bodyRows: 10 }, view: {} },
+  props: { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 10, bodyColumns: 99, scroll: { offset: 0, bodyRows: 10 }, view: {} },
 } as const
 
 const NOW = Date.parse('2026-10-27T16:00:00Z')
@@ -268,5 +268,97 @@ test('a kept window that has since reset draws as no data', async ($, on) => {
   const band = await bandOf(ui)
   expect(band?.props.alt).toBe('Context not measured, Weekly no data')
   expect(String(band?.props.source)).toContain('fill="url(#nd)"')
+  await ui.unmount()
+})
+
+// A desktop chat on the test clock, its limits read once.
+const startChat = async ($: any, on: any, now: () => number) => {
+  on('clock.now', () => ({ value: now() }))
+  on('clock.every', () => ({ value: undefined }))
+  memStore(on)
+  on('session.usage', () => usage(13))
+  on('session.start', (_: unknown, e: { cwd: string }) => ({ cwd: e.cwd }))
+  on('classic.Stop', () => ({}))
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+}
+
+const stop = (background_tasks: unknown[], session_crons: unknown[] = []) => ({
+  stop_hook_active: false,
+  background_tasks,
+  session_crons,
+})
+
+const DEPLOY = { id: 'b1', type: 'shell', status: 'running', description: 'Deploy to production', command: 'sf project deploy start' }
+
+const texts = async (ui: any) => (await ui.findAll({ type: 'Text' })).map((t: { text: string }) => t.text)
+
+test('waiting: rows above the band list background work and how long it has run', async ($, on) => {
+  let now = NOW
+  await startChat($, on, () => now)
+  await $.classic.Stop(stop([DEPLOY], [{ id: 'c1', schedule: '*/5 * * * *', recurring: true, prompt: 'check the deploy' }]))
+
+  now += 125_000
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  const lines = await texts(ui)
+  expect(lines[0]).toBe('⏳ Waiting in Background (2)')
+  expect(lines[1]).toBe('   shell: Deploy to production · running 2m')
+  expect(lines[2]).toBe('   scheduled: check the deploy · scheduled 2m')
+
+  // The band itself still draws, below the rows.
+  const svgs = await ui.findAll({ type: 'Svg' })
+  expect(svgs.some((s: { props: { alt: unknown } }) => String(s.props.alt).startsWith('Context'))).toBe(true)
+  await ui.unmount()
+})
+
+test('waiting: nothing pending draws the band alone', async ($, on) => {
+  await startChat($, on, () => NOW)
+  await $.classic.Stop(stop([DEPLOY]))
+  await $.classic.Stop(stop([]))
+
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  expect(await texts(ui)).toHaveLength(0)
+  await ui.unmount()
+})
+
+test('waiting: rows hide while a turn runs', async ($, on) => {
+  await startChat($, on, () => NOW)
+  await $.classic.Stop(stop([DEPLOY]))
+
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop', props: { ...BAND.props, isWorking: true } })
+  expect(await texts(ui)).toHaveLength(0)
+  await ui.unmount()
+})
+
+test('waiting: the time counts from the call that sent the work to the background', async ($, on) => {
+  let now = NOW
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'b1' } }))
+  await startChat($, on, () => now)
+  await $.tool.call({ tool: 'Bash', command: 'sf project deploy start', run_in_background: true })
+
+  now += 10 * 60_000
+  await $.classic.Stop(stop([DEPLOY]))
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  expect((await texts(ui))[1]).toBe('   shell: Deploy to production · running 10m')
+  await ui.unmount()
+})
+
+// The other plugin draws only its own row; both showing means the band kept it.
+const OTHER_BAND = {
+  name: 'other-band',
+  register(on: any) {
+    on('ui.render', { component: 'AbovePrompt' }, ($: any, e: any) => {
+      const { Text } = $.ui.resolve(e)
+      return <Text>other plugin row</Text>
+    })
+  },
+}
+
+test('waiting: another plugin row is kept, above the band', { plugins: [OTHER_BAND] as any }, async ($, on) => {
+  await startChat($, on, () => NOW)
+  await $.classic.Stop(stop([DEPLOY]))
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  expect(await texts(ui)).toEqual(['other plugin row', '⏳ Waiting in Background (1)', '   shell: Deploy to production · running 0s'])
+  const svgs = await ui.findAll({ type: 'Svg' })
+  expect(svgs.some((s: { props: { alt: unknown } }) => String(s.props.alt).startsWith('Context'))).toBe(true)
   await ui.unmount()
 })

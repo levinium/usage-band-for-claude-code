@@ -22,6 +22,17 @@ named from it and the Release workflow checks the tag against it.
 
 Installed copies pick up a new version with `claude plugin marketplace update`.
 
+## [0.2.0] - 2026-11-10
+
+### Added
+- While a session waits on background work (a background command, agent, monitor or workflow,
+  or a scheduled wake-up), rows above the band list each item and how long it has been
+  running. They hide during a turn and clear once nothing is left.
+
+### Changed
+- Rows other mods draw above the prompt are now kept, above the band, instead of being
+  replaced by it. The band stays on the prompt whichever mod loads first.
+
 ## [0.1.8] - 2026-11-05
 
 ### Fixed
