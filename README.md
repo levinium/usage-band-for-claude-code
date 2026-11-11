@@ -98,8 +98,8 @@ rows above the band list what it is waiting on and for how long:
    scheduled: check the deploy · scheduled 4m
 ```
 
-The times count from when the work started and refresh every 15 seconds. The rows hide while a
-turn is running, and clear once a turn ends with nothing left in the background. Work Claude
+The times count from when the work started and refresh every 15 seconds. They clear once a turn
+ends with nothing left in the background. Work Claude
 Code can't see, such as a CI run on GitHub, is not listed.
 
 Rows other mods draw above the prompt are kept, above these; the band itself always sits on the

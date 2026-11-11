@@ -22,6 +22,14 @@ named from it and the Release workflow checks the tag against it.
 
 Installed copies pick up a new version with `claude plugin marketplace update`.
 
+## [0.2.1] - 2026-11-11
+
+### Fixed
+- The waiting rows did not show in the desktop app. They hid while the session counted as
+  working, which the desktop app appears to report for as long as background work runs.
+  They now show whenever background work is listed and clear once a turn ends with
+  nothing left.
+
 ## [0.2.0] - 2026-11-10
 
 ### Added

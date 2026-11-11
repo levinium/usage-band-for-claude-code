@@ -320,12 +320,12 @@ test('waiting: nothing pending draws the band alone', async ($, on) => {
   await ui.unmount()
 })
 
-test('waiting: rows hide while a turn runs', async ($, on) => {
+test('waiting: rows stay while the session counts as working', async ($, on) => {
   await startChat($, on, () => NOW)
   await $.classic.Stop(stop([DEPLOY]))
 
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop', props: { ...BAND.props, isWorking: true } })
-  expect(await texts(ui)).toHaveLength(0)
+  expect((await texts(ui))[0]).toBe('⏳ Waiting in Background (1)')
   await ui.unmount()
 })
 

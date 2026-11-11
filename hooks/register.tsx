@@ -225,7 +225,10 @@ export const register: Register = on => {
     }
 
     // Other plugins' rows go on top and the band stays on the prompt, whichever
-    // plugin loaded first. The waiting rows sit between, hidden while a turn runs.
+    // plugin loaded first. The waiting rows sit between. They do not hide while a
+    // turn runs: the desktop app counts a session as working while its background
+    // work runs, which is exactly when the rows are needed. The next turn's end
+    // clears them once nothing is left.
     const others = await next(e)
     const items = await read($, waiting)
     const waitingRows = await drawWaiting($, e, items)
@@ -364,7 +367,7 @@ async function drawBand($: EngineInterface, e: BandEvent, isInteractive: boolean
 }
 
 async function drawWaiting($: EngineInterface, e: BandEvent, items: readonly WaitingItem[]) {
-  if (e.props.isWorking || items.length === 0) return null
+  if (items.length === 0) return null
   await read($, tick)
   const now = await $.clock.now()
   const { Box, Text } = $.ui.resolve(e)
