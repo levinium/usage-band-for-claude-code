@@ -90,20 +90,19 @@ same as typing `/compact`. During a turn it waits and tells you so.
 A reply can end while the session still has work running: a background command such as a
 deploy, a background agent, a monitor, a workflow, or a scheduled wake-up from `/loop`. The
 session is waiting then, not finished, and that is easy to miss in the reply. So while it waits,
-rows above the band list what it is waiting on and for how long:
+the right end of the band shows an amber hourglass and what it is waiting on:
 
 ```
-⏳ Waiting in Background (2)
-   shell: Deploy to production · running 4m
-   scheduled: check the deploy · scheduled 4m
+⌛ Waiting · Check-only deploy with Production tests · 4m
 ```
 
-The times count from when the work started and refresh every 15 seconds. They clear once a turn
-ends with nothing left in the background. Work Claude
-Code can't see, such as a CI run on GitHub, is not listed.
+With more than one item it reads `Waiting on 2 · 12m`, the time of the oldest; hover it to see
+each item and how long it has run. The bars shorten to make room. The time counts from when the
+work started and refreshes every 15 seconds. The chip clears once a turn ends with nothing left
+in the background. Work Claude Code can't see, such as a CI run on GitHub, is not listed.
 
-Rows other mods draw above the prompt are kept, above these; the band itself always sits on the
-prompt.
+In a terminal, where the band can take more than one line, the items are listed in rows above
+the bars instead. Rows other mods draw above the prompt are kept, above the band.
 
 ### In VS Code
 

@@ -2,7 +2,22 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderInput } from 'claude-code'
 
 import type { Limit, WaitingItem } from '../types'
-import { PX_PER_COL, RING_COLS, ROW_H, TIP_W, bandLayout, bandSvg, bandWidth, pillSvg, ringSvg, ringTipSvg, slotTipText } from './svg'
+import {
+  PX_PER_COL,
+  RING_COLS,
+  ROW_H,
+  TIP_W,
+  bandLayout,
+  bandSvg,
+  bandWidth,
+  barsWidthBeside,
+  pillSvg,
+  ringSvg,
+  ringTipSvg,
+  slotTipText,
+  fitWaitChip,
+  waitChipBox,
+} from './svg'
 import type { BarSlot, Icon } from './svg'
 
 const limits = atom({ plugin: 'usage-band', key: 'limits' } as const, [] as Limit[])
@@ -19,6 +34,8 @@ const LABEL_MAX = 80
 type BandEvent = RenderInput<'AbovePrompt'>
 
 const CELLS = 8
+// The narrowest a bar's hover pill draws, in columns: room for "no data".
+const MIN_PILL_COLS = 7
 // Columns kept for VS Code's Compact button, chrome included.
 const COMPACT_COLS = 12
 // VS Code pads its band on both sides inside the width it reports.
@@ -98,6 +115,38 @@ export const waitedFor = (ms: number) => {
   const min = Math.floor(sec / 60)
   if (min < 60) return `${min}m`
   return `${Math.floor(min / 60)}h ${String(min % 60).padStart(2, '0')}m`
+}
+
+const runningFor = (item: WaitingItem, now: number) =>
+  `${item.kind === 'scheduled' ? 'scheduled' : 'running'} ${waitedFor(now - item.since)}`
+
+// What the chip says: the one item by name, or a count, with the oldest's time.
+const waitSummary = (items: readonly WaitingItem[], now: number) =>
+  items.length === 0
+    ? undefined
+    : { count: items.length, label: items[0]!.label, age: waitedFor(now - Math.min(...items.map(i => i.since))) }
+
+// Width of a hover pill for `text`: 11px text at about 5.6px a character, padded.
+const pillWidthFor = (text: string) => Math.ceil(text.length * 5.6) + 16
+
+// The chip's hover within `maxWidth`: every item in full if it fits, else names
+// and times only, else the first few and "+N more", else the first name cut.
+const chipTip = (items: readonly WaitingItem[], now: number, maxWidth: number) => {
+  const SEP = '   ·   '
+  const fits = (t: string) => pillWidthFor(t) <= maxWidth
+  const full = items.map(i => `${i.kind}: ${i.label} · ${runningFor(i, now)}`)
+  const short = items.map(i => `${i.label} · ${waitedFor(now - i.since)}`)
+  for (const parts of [full, short]) {
+    for (let k = parts.length; k >= 1; k--) {
+      const more = k < parts.length ? `${SEP}+${parts.length - k} more` : ''
+      const text = parts.slice(0, k).join(SEP) + more
+      if (fits(text)) return text
+    }
+  }
+  const more = items.length > 1 ? `${SEP}+${items.length - 1} more` : ''
+  const tail = ` · ${waitedFor(now - items[0]!.since)}${more}`
+  const room = Math.max(1, Math.floor((maxWidth - 16) / 5.6) - tail.length - 1)
+  return `${items[0]!.label.slice(0, room).trimEnd()}…${tail}`
 }
 
 const compact = async ($: EngineInterface, isWorking: boolean, isInteractive: boolean) => {
@@ -225,13 +274,14 @@ export const register: Register = on => {
     }
 
     // Other plugins' rows go on top and the band stays on the prompt, whichever
-    // plugin loaded first. The waiting rows sit between. They do not hide while a
-    // turn runs: the desktop app counts a session as working while its background
-    // work runs, which is exactly when the rows are needed. The next turn's end
-    // clears them once nothing is left.
+    // plugin loaded first. In a terminal the waiting rows sit between; the desktop
+    // app and VS Code show the band as one row, so there the band draws a waiting
+    // chip of its own. Neither hides while a turn runs: the desktop app counts a
+    // session as working while its background work runs, which is exactly when
+    // they are needed. The next turn's end clears them once nothing is left.
     const others = await next(e)
     const items = await read($, waiting)
-    const waitingRows = await drawWaiting($, e, items)
+    const waitingRows = e.surface === 'terminal' ? await drawWaiting($, e, items) : null
     isWorking = e.props.isWorking
     const band = await drawBand($, e, isInteractive)
     if (!others && !waitingRows) return band
@@ -264,6 +314,8 @@ async function drawBand($: EngineInterface, e: BandEvent, isInteractive: boolean
   const ctxPct = ctx ?? 0
 
   if (e.surface === 'desktop' || e.surface === 'vscode') {
+    const items = await read($, waiting)
+    await read($, tick)
     const { Box, Svg, Button } = $.ui.resolve(e)
     const ringState = (await read($, isCompacting)) ? 'compacting' : 'idle'
     const slots: BarSlot[] = rows.map(r => ({
@@ -275,6 +327,32 @@ async function drawBand($: EngineInterface, e: BandEvent, isInteractive: boolean
     }))
     const alt = [`Context ${ctx === null ? 'not measured' : `${ctxPct}%`}`, ...slots.map(s => `${s.name} ${s.pct === null ? 'no data' : `${s.pct}%`}`)].join(', ')
     const width = bandWidth(e.props.bodyColumns)
+    const summary = waitSummary(items, now)
+    const altWith = (chip: string | undefined) =>
+      chip === undefined
+        ? summary
+          ? `${alt}, waiting on ${summary.count} in the background`
+          : alt
+        : `${alt}, ${chip || `waiting on ${summary!.count} in the background`}`
+    const fitChip = (rowWidth: number, withRing: boolean) =>
+      fitWaitChip(rowWidth, slots.length, summary, { withRing, compacting: ringState === 'compacting' })
+    // The waiting chip's hover: every item, its right edge on the chip's.
+    const chipHover = (rowWidth: number, chip: string | undefined, left = 0) => {
+      if (chip === undefined) return null
+      const box = waitChipBox(rowWidth, chip)
+      const tip = chipTip(items, now, rowWidth)
+      const pillW = Math.min(rowWidth, pillWidthFor(tip))
+      const zoneLeft = Math.floor(box.x / PX_PER_COL)
+      const zoneCols = Math.ceil((box.x + box.w) / PX_PER_COL) - zoneLeft
+      const pillLeft = Math.max(0, Math.floor((box.x + box.w - pillW) / PX_PER_COL))
+      return (
+        <Box key="waiting" position="absolute" left={left + zoneLeft} top={0} width={zoneCols} height={1}>
+          <Box display="none" hover={{ display: 'flex' }} position="absolute" left={pillLeft - zoneLeft} top={0}>
+            <Svg source={pillSvg(tip, pillW)} alt={tip} width={pillW} height={ROW_H} />
+          </Box>
+        </Box>
+      )
+    }
     // The band is a plain image, so redraws (a resize) swap it in place.
     // Hover lives in layers above it: a keyed Box per slot reveals that
     // slot's pill, a display toggle that never redraws the band.
@@ -285,8 +363,10 @@ async function drawBand($: EngineInterface, e: BandEvent, isInteractive: boolean
         const { x, segW, bx } = layout[i]!
         const zoneLeft = Math.floor(x / PX_PER_COL)
         const zoneCols = Math.ceil((x + segW) / PX_PER_COL) - zoneLeft
-        const pillLeft = Math.floor(bx / PX_PER_COL)
-        const pillW = (zoneLeft + zoneCols - pillLeft) * PX_PER_COL
+        // A narrow slot's pill still holds "no data" or a percentage, and stays
+        // inside the row: it widens past the slot, moving left at the row's end.
+        const pillW = Math.max((zoneLeft + zoneCols - Math.floor(bx / PX_PER_COL)) * PX_PER_COL, MIN_PILL_COLS * PX_PER_COL)
+        const pillLeft = Math.max(0, Math.min(Math.floor(bx / PX_PER_COL), Math.floor((barsWidth - pillW) / PX_PER_COL)))
         return (
           <Box key={`slot-${s.name}`} position="absolute" left={zoneLeft} top={0} width={zoneCols} height={1}>
             <Box display="none" hover={{ display: 'flex' }} position="absolute" left={pillLeft - zoneLeft} top={0}>
@@ -304,6 +384,7 @@ async function drawBand($: EngineInterface, e: BandEvent, isInteractive: boolean
       // The row never wraps: if the button runs wider than the room kept for
       // it, the bars' right end is cut instead of the bars dropping a line.
       const barsW = width - ROW_H - (COMPACT_COLS + 2 + VSCODE_PAD_COLS) * PX_PER_COL
+      const chip = fitChip(barsW, false)
       return (
         <Box flexDirection="row" flexWrap="nowrap" alignItems="center" columnGap={1} width="100%">
           <Box key="ring" position="relative">
@@ -314,8 +395,9 @@ async function drawBand($: EngineInterface, e: BandEvent, isInteractive: boolean
           </Box>
           <Button key="compact" label="Compact" onPress={() => compact($, e.props.isWorking, isInteractive)} />
           <Box position="relative" flexShrink={1} minWidth={0} overflow="hidden">
-            <Svg source={bandSvg(barsW, ctx, ringState, slots, false)} alt={alt} width={barsW} height={ROW_H} />
-            {slotHovers(barsW, 0)}
+            <Svg source={bandSvg(barsW, ctx, ringState, slots, false, chip)} alt={altWith(chip)} width={barsW} height={ROW_H} />
+            {slotHovers(barsWidthBeside(barsW, chip), 0)}
+            {chipHover(barsW, chip)}
           </Box>
         </Box>
       )
@@ -323,10 +405,12 @@ async function drawBand($: EngineInterface, e: BandEvent, isInteractive: boolean
 
     // Over the ring, an invisible Client takes the clicks an image cannot.
     const { Client } = $.ui.resolve(e)
+    const chip = fitChip(width, true)
     return (
       <Box position="relative" width="100%">
-        <Svg source={bandSvg(width, ctx, ringState, slots)} alt={alt} width={width} height={ROW_H} />
-        {slotHovers(width)}
+        <Svg source={bandSvg(width, ctx, ringState, slots, true, chip)} alt={altWith(chip)} width={width} height={ROW_H} />
+        {slotHovers(barsWidthBeside(width, chip))}
+        {chipHover(width, chip)}
         <Box key="ring" position="absolute" left={0} top={0} flexDirection="row">
           <Client key="ring" module="./ring-hit.tsx" width={RING_COLS} height={1} />
           <Box display="none" hover={{ display: 'flex' }}>

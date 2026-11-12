@@ -291,22 +291,52 @@ const stop = (background_tasks: unknown[], session_crons: unknown[] = []) => ({
 const DEPLOY = { id: 'b1', type: 'shell', status: 'running', description: 'Deploy to production', command: 'sf project deploy start' }
 
 const texts = async (ui: any) => (await ui.findAll({ type: 'Text' })).map((t: { text: string }) => t.text)
+const svgsOf = async (ui: any) => (await ui.findAll({ type: 'Svg' })) as { props: { alt: unknown; source: unknown } }[]
 
-test('waiting: rows above the band list background work and how long it has run', async ($, on) => {
+const SCHEDULED = { id: 'c1', schedule: '*/5 * * * *', recurring: true, prompt: 'check the deploy' }
+
+test('waiting: desktop draws a chip on the band row naming the one item and its time', async ($, on) => {
   let now = NOW
   await startChat($, on, () => now)
-  await $.classic.Stop(stop([DEPLOY], [{ id: 'c1', schedule: '*/5 * * * *', recurring: true, prompt: 'check the deploy' }]))
+  await $.classic.Stop(stop([DEPLOY]))
 
   now += 125_000
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
-  const lines = await texts(ui)
-  expect(lines[0]).toBe('⏳ Waiting in Background (2)')
-  expect(lines[1]).toBe('   shell: Deploy to production · running 2m')
-  expect(lines[2]).toBe('   scheduled: check the deploy · scheduled 2m')
+  const band = await bandOf(ui)
+  expect(String(band?.props.source)).toContain('Waiting · Deploy to production · 2m')
+  expect(band?.props.alt).toBe('Context 13%, Session 3%, Weekly 85%, Waiting · Deploy to production · 2m')
+  // No rows above the band: the desktop app shows the band as one row.
+  expect(await texts(ui)).toHaveLength(0)
+  // Its hover pill lists the item in full.
+  const alts = (await svgsOf(ui)).map(s => String(s.props.alt))
+  expect(alts).toContain('shell: Deploy to production · running 2m')
+  await ui.unmount()
+})
 
-  // The band itself still draws, below the rows.
-  const svgs = await ui.findAll({ type: 'Svg' })
-  expect(svgs.some((s: { props: { alt: unknown } }) => String(s.props.alt).startsWith('Context'))).toBe(true)
+test('waiting: two items show as a count with the oldest time, all listed on hover', async ($, on) => {
+  let now = NOW
+  await startChat($, on, () => now)
+  await $.classic.Stop(stop([DEPLOY], [SCHEDULED]))
+
+  now += 4 * 60_000
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  expect(String((await bandOf(ui))?.props.source)).toContain('Waiting on 2 · 4m')
+  const alts = (await svgsOf(ui)).map(s => String(s.props.alt))
+  expect(alts).toContain('shell: Deploy to production · running 4m   ·   scheduled: check the deploy · scheduled 4m')
+  await ui.unmount()
+})
+
+test('waiting: the bars make room for the chip', async ($, on) => {
+  await startChat($, on, () => NOW)
+  const plain = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  const before = String((await bandOf(plain))?.props.source)
+  await plain.unmount()
+
+  await $.classic.Stop(stop([DEPLOY]))
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  const after = String((await bandOf(ui))?.props.source)
+  const firstBarWidth = (svg: string) => Number(/<rect x="[\d.]+" y="7" width="([\d.]+)"/.exec(svg)?.[1])
+  expect(firstBarWidth(after)).toBeLessThan(firstBarWidth(before))
   await ui.unmount()
 })
 
@@ -316,16 +346,26 @@ test('waiting: nothing pending draws the band alone', async ($, on) => {
   await $.classic.Stop(stop([]))
 
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
-  expect(await texts(ui)).toHaveLength(0)
+  expect(String((await bandOf(ui))?.props.source)).not.toContain('Waiting')
+  expect((await bandOf(ui))?.props.alt).toBe('Context 13%, Session 3%, Weekly 85%')
   await ui.unmount()
 })
 
-test('waiting: rows stay while the session counts as working', async ($, on) => {
+test('waiting: the chip stays while the session counts as working', async ($, on) => {
   await startChat($, on, () => NOW)
   await $.classic.Stop(stop([DEPLOY]))
 
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop', props: { ...BAND.props, isWorking: true } })
-  expect((await texts(ui))[0]).toBe('⏳ Waiting in Background (1)')
+  expect(String((await bandOf(ui))?.props.source)).toContain('Waiting · Deploy to production')
+  await ui.unmount()
+})
+
+test('waiting: VS Code draws the chip on its bars too', async ($, on) => {
+  await startChat($, on, () => NOW)
+  await $.classic.Stop(stop([DEPLOY]))
+
+  const ui = await $.ui.mount({ ...BAND, surface: 'vscode' })
+  expect(String((await bandOf(ui))?.props.source)).toContain('Waiting · Deploy to production · 0s')
   await ui.unmount()
 })
 
@@ -338,7 +378,57 @@ test('waiting: the time counts from the call that sent the work to the backgroun
   now += 10 * 60_000
   await $.classic.Stop(stop([DEPLOY]))
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
-  expect((await texts(ui))[1]).toBe('   shell: Deploy to production · running 10m')
+  expect(String((await bandOf(ui))?.props.source)).toContain('Waiting · Deploy to production · 10m')
+  await ui.unmount()
+})
+
+test('waiting: a terminal lists the items in rows above the bars', async ($, on) => {
+  let now = NOW
+  await startChat($, on, () => now)
+  await $.classic.Stop(stop([DEPLOY], [SCHEDULED]))
+
+  now += 125_000
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  const lines = await texts(ui)
+  expect(lines[0]).toBe('⏳ Waiting in Background (2)')
+  expect(lines[1]).toBe('   shell: Deploy to production · running 2m')
+  expect(lines[2]).toBe('   scheduled: check the deploy · scheduled 2m')
+  await ui.unmount()
+})
+
+test('waiting: a narrow row keeps the hourglass, and every bar keeps its room', async ($, on) => {
+  await startChat($, on, () => NOW)
+  await $.classic.Stop(stop([DEPLOY]))
+  // 30 columns: too narrow for any words beside three limits.
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop', props: { ...BAND.props, bodyColumns: 30 } })
+  const band = await bandOf(ui)
+  const svg = String(band?.props.source)
+  expect(svg).toContain('M3 1.5h8M3 12.5h8') // the hourglass
+  expect(svg).not.toContain('Waiting ·')
+  expect(band?.props.alt).toBe('Context 13%, Session 3%, Weekly 85%, waiting on 1 in the background')
+  await ui.unmount()
+})
+
+test('waiting: a long name is cut to fit, with no space before the ellipsis', async ($, on) => {
+  await startChat($, on, () => NOW)
+  const long = { ...DEPLOY, description: 'Check-only deploy with Production tests against fullsbox and then more words' }
+  await $.classic.Stop(stop([long]))
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  const svg = String((await bandOf(ui))?.props.source)
+  expect(svg).toMatch(/Waiting · Check-only deploy[^<]*\S… · 0s/)
+  await ui.unmount()
+})
+
+test('waiting: the hover pill fits its text on a narrow row', async ($, on) => {
+  await startChat($, on, () => NOW)
+  const many = Array.from({ length: 12 }, (_, i) => ({ ...DEPLOY, id: `b${i}`, description: `Deploy number ${i}` }))
+  await $.classic.Stop(stop(many))
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop', props: { ...BAND.props, bodyColumns: 50 } })
+  const tip = (await svgsOf(ui)).find(s => String(s.props.alt).includes('more'))
+  expect(tip).toBeTruthy()
+  const width = Number((tip as unknown as { props: { width: number } }).props.width)
+  expect(String(tip?.props.alt).length * 5.6 + 16).toBeLessThanOrEqual(width)
+  expect(width).toBeLessThanOrEqual(400)
   await ui.unmount()
 })
 
@@ -357,8 +447,7 @@ test('waiting: another plugin row is kept, above the band', { plugins: [OTHER_BA
   await startChat($, on, () => NOW)
   await $.classic.Stop(stop([DEPLOY]))
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
-  expect(await texts(ui)).toEqual(['other plugin row', '⏳ Waiting in Background (1)', '   shell: Deploy to production · running 0s'])
-  const svgs = await ui.findAll({ type: 'Svg' })
-  expect(svgs.some((s: { props: { alt: unknown } }) => String(s.props.alt).startsWith('Context'))).toBe(true)
+  expect(await texts(ui)).toEqual(['other plugin row'])
+  expect(String((await bandOf(ui))?.props.source)).toContain('Waiting · Deploy to production')
   await ui.unmount()
 })

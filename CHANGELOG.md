@@ -22,6 +22,19 @@ named from it and the Release workflow checks the tag against it.
 
 Installed copies pick up a new version with `claude plugin marketplace update`.
 
+## [0.2.2] - 2026-11-12
+
+### Fixed
+- The waiting status now shows in the desktop app and VS Code. Both show the band as a single
+  row, so the rows above it never appeared. The band now draws a waiting chip at the right end
+  of its own row: an amber hourglass with the item's name and time, or a count when there are
+  several, with every item on hover. The bars shorten to make room. A terminal keeps the rows.
+- On a narrow row the chip shortens (no name, then the time alone, then the hourglass alone)
+  so every bar keeps its room, and the hourglass always shows while anything waits. During a
+  compaction it sits after "Compacting conversation…" instead of over it.
+- On a very narrow row, a slot too small for its reset label drops the label instead of
+  drawing it over the bar, and hover pills keep room for their text and stay inside the row.
+
 ## [0.2.1] - 2026-11-11
 
 ### Fixed

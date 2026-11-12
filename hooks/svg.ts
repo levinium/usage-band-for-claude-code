@@ -90,6 +90,61 @@ const spareText = (slots: BarSlot[], room: number) => {
 
 const SPARE_GAP = 16
 
+// The waiting chip at the right end of the row: an amber hourglass and one line.
+const WAIT_ICON_GAP = 6
+const WAIT_GAP = 22
+const ICON_ONLY_GAP = 12
+const HOURGLASS = `<path stroke="${AMBER}" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M3 1.5h8M3 12.5h8M4 1.5c0 3 3 4 3 5.5s-3 2.5-3 5.5M10 1.5c0 3-3 4-3 5.5s3 2.5 3 5.5"/>`
+
+/** Width of the waiting chip for `text`, icon included; '' is the hourglass alone. */
+export const waitChipWidth = (text: string) => (text ? Math.ceil(ICON + WAIT_ICON_GAP + text.length * 5.6) : ICON)
+
+// Width of "Compacting conversation…", which the chip must not cover.
+const COMPACTING_W = 140
+
+/** What the band is waiting on, for the chip: one item by name, or a count. */
+export type WaitSummary = { count: number; label: string; age: string }
+
+/**
+ * The chip's line for a row `width` wide holding `slots` bars: the longest form
+ * that leaves every bar its minimum, else the hourglass alone (''), which always
+ * shows: the bars give up its few pixels. Undefined when nothing is waiting.
+ */
+export const fitWaitChip = (
+  width: number,
+  slots: number,
+  wait: WaitSummary | undefined,
+  { withRing = true, compacting = false } = {},
+) => {
+  if (!wait || wait.count === 0) return undefined
+  const avail = width - RIGHT_PAD - (withRing ? LEFT : 0)
+  const taken = compacting ? COMPACTING_W : slots > 0 ? slots * MIN_SEG + (slots - 1) * SEG_GAP : 0
+  // A long name stops at 40% of the row, so the bars keep most of it.
+  const budget = Math.min(avail - taken - WAIT_GAP, avail * 0.4)
+  const fits = (text: string) => waitChipWidth(text) <= budget
+  const named = (room: number) => {
+    const chars = Math.floor((room - ICON - WAIT_ICON_GAP) / 5.6) - `Waiting ·  · ${wait.age}`.length
+    if (wait.label.length <= chars) return wait.label
+    return chars >= 7 ? `${wait.label.slice(0, chars - 1).trimEnd()}…` : undefined
+  }
+  const name = wait.count === 1 ? named(budget) : undefined
+  const forms =
+    wait.count === 1
+      ? [name === undefined ? undefined : `Waiting · ${name} · ${wait.age}`, `Waiting · ${wait.age}`, wait.age, '']
+      : [`Waiting on ${wait.count} · ${wait.age}`, `${wait.count} waiting · ${wait.age}`, wait.age, '']
+  return forms.find((f): f is string => f === '' || (f !== undefined && fits(f))) ?? ''
+}
+
+/** Room the bars keep when a chip of `text` sits at the right end of a `width` row. */
+export const barsWidthBeside = (width: number, text: string | undefined) =>
+  text === undefined ? width : width - waitChipWidth(text) - (text ? WAIT_GAP : ICON_ONLY_GAP)
+
+const waitChip = (width: number, text: string) => {
+  const x = width - RIGHT_PAD - waitChipWidth(text)
+  const label = text ? `<text class="lbl" x="${(x + ICON + WAIT_ICON_GAP).toFixed(1)}" y="${MID}">${esc(text)}</text>` : ''
+  return `<g transform="translate(${x.toFixed(1)} ${MID - ICON / 2})">${HOURGLASS}</g>${label}`
+}
+
 const ring = (pct: number | null) => {
   const c = MID
   // No context reading yet: a thin dashed outline instead of an empty (0%) ring.
@@ -113,6 +168,8 @@ const LEFT = ROW_H + RING_GAP
 // Slots are sized as if at least this many were drawn, so one or two
 // reported limits keep a normal bar and leave room for their figures.
 const MIN_SLOTS = 3
+// The narrowest a slot draws cleanly: icon, the shortest bar, reset label.
+const MIN_SEG = ICON + ICON_GAP + MIN_BAR + RESET_GAP + RESET_W
 
 /**
  * Where each slot sits: its left edge, width, and where its bar starts.
@@ -120,7 +177,10 @@ const MIN_SLOTS = 3
  * without it (VS Code puts the ring and a button before them).
  */
 export const bandLayout = (width: number, n: number, left = LEFT) => {
-  const cols = Math.max(n, MIN_SLOTS)
+  // As if MIN_SLOTS were drawn while that still leaves each slot its minimum;
+  // a narrower row gives the slots it has the room instead.
+  const fits = Math.floor((width - RIGHT_PAD - left + SEG_GAP) / (MIN_SEG + SEG_GAP))
+  const cols = Math.max(n, Math.min(MIN_SLOTS, fits))
   const segW = (width - RIGHT_PAD - left - (cols - 1) * SEG_GAP) / cols
   return Array.from({ length: n }, (_, i) => {
     const x = left + i * (segW + SEG_GAP)
@@ -132,27 +192,38 @@ export const bandLayout = (width: number, n: number, left = LEFT) => {
  * The band as a plain image (no hover inside it): a redraw swaps the image in
  * place, so resizing never rebuilds a frame. Hover pop-ups are separate.
  */
-export const bandSvg = (width: number, ctx: number | null, ringState: RingState, slots: BarSlot[], withRing = true) => {
+export const bandSvg = (
+  width: number,
+  ctx: number | null,
+  ringState: RingState,
+  slots: BarSlot[],
+  withRing = true,
+  waiting?: string,
+) => {
   const left = withRing ? LEFT : 0
+  // The bars take the row less the waiting chip, so the chip never covers them.
+  const barsW = barsWidthBeside(width, waiting)
   let body: string
   if (ringState === 'compacting') {
     body = `<text class="lbl" x="${left}" y="${MID}">Compacting conversation…</text>`
   } else {
-    const layout = bandLayout(width, slots.length, left)
+    const layout = bandLayout(barsW, slots.length, left)
     body = slots
       .map((s, i) => {
         const { x, segW, bx } = layout[i]!
         const fullBarW = segW - ICON - ICON_GAP
         const by = MID - BAR_H / 2
-        // A limit with no reset time gives its bar the label's space too.
-        const barW = Math.max(MIN_BAR, s.reset ? fullBarW - RESET_GAP - RESET_W : fullBarW)
+        // A slot too narrow for its reset label drops it (the hover still has
+        // it); a limit with no reset time gives its bar the label's space too.
+        const showReset = s.reset !== '' && segW >= MIN_SEG
+        const barW = Math.max(Math.min(MIN_BAR, fullBarW), BAR_H, showReset ? fullBarW - RESET_GAP - RESET_W : fullBarW)
         const p = Math.max(0, Math.min(100, s.pct ?? 0))
         const fw = p > 0 ? Math.max(BAR_H, (barW * p) / 100) : 0
         const fill = fw > 0 ? `<rect x="${bx}" y="${by}" width="${fw.toFixed(1)}" height="${BAR_H}" rx="${BAR_H / 2}" fill="${fillColor(p)}"/>` : ''
         const noData = s.pct === null
         return `<g transform="translate(${x} ${MID - ICON / 2})"${noData ? ' class="nod"' : ''}>${ICONS[s.icon]}</g>
 <rect x="${bx}" y="${by}" width="${barW.toFixed(1)}" height="${BAR_H}" rx="${BAR_H / 2}" fill="${noData ? 'url(#nd)' : TRACK}"/>${fill}
-${s.reset ? `<text class="rst" x="${(x + segW).toFixed(1)}" y="${MID}" text-anchor="end">${esc(s.reset)}</text>` : ''}`
+${showReset ? `<text class="rst" x="${(x + segW).toFixed(1)}" y="${MID}" text-anchor="end">${esc(s.reset)}</text>` : ''}`
       })
       .join('')
     // Fewer slots than MIN_SLOTS leave room after the last one: spell out the
@@ -160,11 +231,18 @@ ${s.reset ? `<text class="rst" x="${(x + segW).toFixed(1)}" y="${MID}" text-anch
     if (slots.length > 0 && slots.length < MIN_SLOTS) {
       const last = layout[slots.length - 1]!
       const start = last.x + last.segW + SEG_GAP
-      const text = spareText(slots, width - RIGHT_PAD - start)
+      const text = spareText(slots, barsW - RIGHT_PAD - start)
       if (text) body += `<text class="lbl" x="${start.toFixed(1)}" y="${MID}">${text}</text>`
     }
   }
+  if (waiting !== undefined) body += waitChip(width, waiting)
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${ROW_H}" viewBox="0 0 ${width} ${ROW_H}">${STYLE}${HATCH}${withRing ? ring(ctx) : ''}${body}</svg>`
+}
+
+/** Where the waiting chip sits in a `width` row: its left edge and width, in pixels. */
+export const waitChipBox = (width: number, text: string) => {
+  const w = waitChipWidth(text)
+  return { x: width - RIGHT_PAD - w, w }
 }
 
 /** The ring alone, for VS Code, where it sits outside the bars. */
